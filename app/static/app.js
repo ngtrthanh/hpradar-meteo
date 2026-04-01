@@ -1,5 +1,6 @@
 const A='/api';
 let STN=[],sel=null,map,popup,MK={},rCur='meteo',bCur='tide',searchQ='';
+let timeRange='24h',trStart=null,trEnd=null,lastRightData=[];
 const C=['#00ffaa','#00d4ff','#ff00aa','#ff8800','#ffcc00','#aa55ff','#ff3355','#55ffcc','#00ff55','#ff5500','#55aaff','#ff55aa'];
 
 // ── MAP LAYERS ──
@@ -137,32 +138,89 @@ function togPanel(w){
 function togBot(){
   const app=$('app');app.classList.toggle('bot-open');
   $('bb').classList.toggle('on',app.classList.contains('bot-open'));
+  const bot=$('pbot');
+  if(bot)bot.classList.remove('collapsed');
   if(app.classList.contains('bot-open'))loadBot();
   setTimeout(()=>map.resize(),50);
 }
 function toggleMob(w){
   const el=$(w==='left'?'pl':'pr');
+  closeMob();
+  el.classList.add('mob');
+  $('mob-overlay').classList.add('show');
+}
+function closeMob(){
   document.querySelectorAll('.left,.right').forEach(p=>p.classList.remove('mob'));
-  el.classList.toggle('mob');
+  $('mob-overlay').classList.remove('show');
+}
+
+// ── TIME RANGE ──
+function setRange(r){
+  timeRange=r;
+  document.querySelectorAll('.trpick .trbtn').forEach(b=>b.classList.toggle('on',b.textContent.trim().toLowerCase()===r));
+  if(r==='custom'){
+    trStart=$('tr-start').value?new Date($('tr-start').value).toISOString():null;
+    trEnd=$('tr-end').value?new Date($('tr-end').value).toISOString():null;
+  }else{trStart=null;trEnd=null}
+  loadRight();
+}
+function trQuery(){
+  if(timeRange==='all')return '';
+  if(timeRange==='custom'){
+    let q='';
+    if(trStart)q+=`&start=${trStart}`;
+    if(trEnd)q+=`&end=${trEnd}`;
+    return q;
+  }
+  const ms={
+    '1h':36e5,'6h':216e5,'24h':864e5,'7d':6048e5,'30d':2592e6
+  }[timeRange]||864e5;
+  return `&start=${new Date(Date.now()-ms).toISOString()}`;
 }
 
 // ── RIGHT ──
 function rTab(t){rCur=t;document.querySelectorAll('.rtab').forEach(x=>x.classList.toggle('on',x.dataset.t===t));loadRight()}
 async function loadRight(){
-  const el=$('rc'),q=sel?`&mmsi=${sel}`:'';
+  const el=$('rc'),q=sel?`&mmsi=${sel}`:'',tq=trQuery();
+  lastRightData=[];
   try{
     if(rCur==='meteo'){
-      const d=await J(`/meteo?limit=200${q}`);
+      const d=await J(`/meteo?limit=500${q}${tq}`);
+      lastRightData=d;
+      $('einfo').textContent=d.length+' rows';
       el.innerHTML=d.length?`<table class="rt"><thead><tr><th>MMSI</th><th>Wind</th><th>Dir</th><th>When</th></tr></thead><tbody>${d.map(r=>`<tr><td>${r.mmsi}</td><td class="hi">${r.wspeed??'—'}</td><td>${r.wdir??'—'}°</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No meteo data</div>';
     }else if(rCur==='hydro'){
-      const d=await J(`/hydro?limit=200${q}`);
+      const d=await J(`/hydro?limit=500${q}${tq}`);
+      lastRightData=d;
+      $('einfo').textContent=d.length+' rows';
       el.innerHTML=d.length?`<table class="rt"><thead><tr><th>MMSI</th><th>Level</th><th>Sea</th><th>When</th></tr></thead><tbody>${d.map(r=>`<tr><td>${r.mmsi}</td><td class="hi">${r.waterlevel??'—'}</td><td>${r.seastate??'—'}</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No hydro data</div>';
     }else{
+      $('einfo').textContent='';
       try{const d=await J('/alerts');const ev=d.recent_events||[];
+        lastRightData=ev;
+        $('einfo').textContent=ev.length+' events';
         el.innerHTML=ev.length?`<table class="rt"><thead><tr><th>MMSI</th><th>Val</th><th>When</th></tr></thead><tbody>${ev.slice(0,50).map(e=>`<tr><td>${e.mmsi}</td><td style="color:var(--yellow)">${e.value?.toFixed(2)??'—'}</td><td>${ago(e.triggered_at)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No alerts</div>';
       }catch(e){el.innerHTML='<div class="empty">Alerts unavailable</div>'}
     }
   }catch(e){el.innerHTML='<div class="empty">Load failed</div>'}
+}
+
+// ── EXPORT ──
+function exportData(fmt){
+  if(!lastRightData.length)return;
+  let content,mime,ext;
+  if(fmt==='csv'){
+    const keys=Object.keys(lastRightData[0]);
+    content='\uFEFF'+keys.join(',')+'\n'+lastRightData.map(r=>keys.map(k=>{const v=r[k];return v==null?'':'"'+v+'"'}).join(',')).join('\n');
+    mime='text/csv;charset=utf-8';ext='csv';
+  }else{
+    content=JSON.stringify(lastRightData,null,2);
+    mime='application/json';ext='json';
+  }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type:mime}));
+  a.download=`tidewatch_${rCur}_${new Date().toISOString().slice(0,10)}.${ext}`;
+  a.click();URL.revokeObjectURL(a.href);
 }
 
 // ── BOTTOM ──
@@ -188,7 +246,7 @@ async function tidePlots(el){
     const s=list[i],c=C[STN.indexOf(s)%C.length],div=$('tc'+i);
     if(!div)continue;
     try{
-      const d=await J(`/hydro?mmsi=${s.mmsi}&limit=1000`);
+      const d=await J(`/hydro?mmsi=${s.mmsi}&limit=1000${trQuery()}`);
       const wl=d.filter(r=>r.waterlevel!=null).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
       if(!wl.length){div.innerHTML='<div class="empty">No data</div>';continue}
       Plotly.newPlot(div,[{
@@ -217,7 +275,7 @@ async function windRose(el){
     const s=list[i],div=$('wr'+i);
     if(!div)continue;
     try{
-      const d=await J(`/meteo?mmsi=${s.mmsi}&limit=2000`);
+      const d=await J(`/meteo?mmsi=${s.mmsi}&limit=2000${trQuery()}`);
       const v=d.filter(r=>r.wdir!=null&&r.wspeed!=null);
       if(!v.length){div.innerHTML='<div class="empty">No wind data</div>';continue}
       const traces=bins.map((_,si)=>{
@@ -272,3 +330,34 @@ function ago(ts){
   if(ms<864e5)return Math.floor(ms/36e5)+'h';
   return new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric'});
 }
+
+// ── MOBILE BOTTOM SHEET SWIPE ──
+(function(){
+  let startY=0,startH=0;
+  const handle=document.getElementById('bhandle');
+  if(!handle)return;
+  handle.addEventListener('touchstart',e=>{
+    startY=e.touches[0].clientY;
+    const bot=document.getElementById('pbot');
+    startH=bot.getBoundingClientRect().height;
+    bot.style.transition='none';
+  });
+  handle.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    const dy=startY-e.touches[0].clientY;
+    const bot=document.getElementById('pbot');
+    const nh=Math.max(60,Math.min(window.innerHeight*.85,startH+dy));
+    bot.style.maxHeight=nh+'px';
+  },{passive:false});
+  handle.addEventListener('touchend',()=>{
+    const bot=document.getElementById('pbot');
+    bot.style.transition='max-height .3s ease';
+    const h=bot.getBoundingClientRect().height;
+    if(h<120){
+      bot.classList.add('collapsed');
+    }else{
+      bot.classList.remove('collapsed');
+      bot.style.maxHeight=Math.min(h,window.innerHeight*.85)+'px';
+    }
+  });
+})();

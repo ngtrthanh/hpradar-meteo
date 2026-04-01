@@ -14,9 +14,9 @@
   <nav class="nav">
     <div class="nav-brand"><span class="i">🌊</span><span class="t">TIDE WATCH</span></div>
     <div class="tb">
-      <button class="tbtn on" id="bl" onclick="togPanel('left')">☰ Stations</button>
+      <button class="tbtn on" id="bl" onclick="window.innerWidth<=1100?toggleMob('left'):togPanel('left')">☰ Stations</button>
       <button class="tbtn" id="bb" onclick="togBot()">📊 Charts</button>
-      <button class="tbtn on" id="br" onclick="togPanel('right')">▤ Data</button>
+      <button class="tbtn on" id="br" onclick="window.innerWidth<=1100?toggleMob('right'):togPanel('right')">▤ Data</button>
     </div>
     <div class="nav-r">
       <div class="ns"><span class="dot" id="hd"></span> <b id="n_s">-</b> stn</div>
@@ -42,10 +42,28 @@
       <div class="rtab" data-t="hydro" onclick="rTab('hydro')">🌊 Hydro</div>
       <div class="rtab" data-t="alerts" onclick="rTab('alerts')">⚡ Alerts</div>
     </div>
+    <div class="trpick" id="rtime">
+      <button class="trbtn on" onclick="setRange('1h')">1H</button>
+      <button class="trbtn" onclick="setRange('6h')">6H</button>
+      <button class="trbtn" onclick="setRange('24h')">24H</button>
+      <button class="trbtn" onclick="setRange('7d')">7D</button>
+      <button class="trbtn" onclick="setRange('30d')">30D</button>
+      <button class="trbtn" onclick="setRange('all')">All</button>
+      <input type="datetime-local" id="tr-start" onchange="setRange('custom')">
+      <input type="datetime-local" id="tr-end" onchange="setRange('custom')">
+    </div>
     <div class="rcontent" id="rc"></div>
+    <div class="export-bar">
+      <button class="ebtn" onclick="exportData('csv')">⬇ CSV</button>
+      <button class="ebtn" onclick="exportData('json')">⬇ JSON</button>
+      <span class="einfo" id="einfo"></span>
+    </div>
   </aside>
 
+  <div class="mob-overlay" id="mob-overlay" onclick="closeMob()"></div>
+
   <section class="bot" id="pbot">
+    <div class="bhandle" id="bhandle"></div>
     <div class="bhead">
       <div class="tb">
         <button class="tbtn on" data-b="tide" onclick="bTab('tide')">🌊 Tide</button>
