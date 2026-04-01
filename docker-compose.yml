@@ -1,0 +1,29 @@
+services:
+  hydro-api:
+    build: .
+    container_name: hydro-api
+    restart: unless-stopped
+    ports:
+      - "8111:8000"
+    environment:
+      - DB_HOST=${DB_HOST:-100.100.40.89}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-mhdb}
+      - DB_USER=${DB_USER:-ais_user}
+      - DB_PASS=${DB_PASS:-RTL2838UHIDIR}
+      - FETCH_URLS=${FETCH_URLS:-https://m3.hpradar.com/api/binmsgs.json,https://m4.hpradar.com/api/binmsgs.json,https://aisinfra.hpradar.com/api/binmsgs.json}
+      - POLL_INTERVAL=${POLL_INTERVAL:-180}
+      - RETENTION_DAYS=${RETENTION_DAYS:-90}
+      - API_KEY=${API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - apparmor:unconfined      
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'

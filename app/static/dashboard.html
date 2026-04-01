@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIS Meteo/Hydro Dashboard</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#333;min-height:100vh}
+        .container{max-width:1400px;margin:0 auto;padding:20px}
+        .header{text-align:center;margin-bottom:30px;color:#fff}
+        .header h1{font-size:2.5rem;margin-bottom:10px;text-shadow:0 2px 4px rgba(0,0,0,.3)}
+        .header p{font-size:1.1rem;opacity:.9}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin-bottom:30px}
+        .stat-card{background:#fff;padding:20px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.1);text-align:center;transition:transform .2s}
+        .stat-card:hover{transform:translateY(-2px)}
+        .stat-value{font-size:2.5rem;font-weight:bold;color:#667eea;margin-bottom:5px}
+        .stat-label{font-size:.9rem;color:#666;text-transform:uppercase;letter-spacing:1px}
+        .stat-skeleton{background:linear-gradient(90deg,#eee 25%,#f5f5f5 50%,#eee 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;height:2.5rem;border-radius:6px;margin-bottom:5px}
+        @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+        .nav-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-bottom:30px}
+        .nav-card{background:#fff;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.1);transition:transform .2s}
+        .nav-card:hover{transform:translateY(-2px)}
+        .nav-card h3{color:#333;margin-bottom:10px;font-size:1.3rem}
+        .nav-card p{color:#666;margin-bottom:15px;line-height:1.5}
+        .btn{display:inline-block;background:linear-gradient(45deg,#667eea,#764ba2);color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:500;transition:all .2s;border:none;cursor:pointer}
+        .btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(102,126,234,.4)}
+        .status{background:#fff;padding:15px;border-radius:8px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+        .status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:10px}
+        .status-ok{background-color:#22c55e}
+        .status-error{background-color:#ef4444}
+        .toast{position:fixed;top:20px;right:20px;background:#ef4444;color:#fff;padding:12px 20px;border-radius:8px;display:none;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)}
+    </style>
+</head>
+<body>
+    <div class="toast" id="toast"></div>
+    <div class="container">
+        <div class="header">
+            <h1>🌊 AIS Meteo/Hydro Dashboard</h1>
+            <p>Real-time maritime meteorological and hydrographic data collection</p>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-skeleton" id="skel-s"></div><div class="stat-value" id="stations-count" style="display:none">-</div><div class="stat-label">Weather Stations</div></div>
+            <div class="stat-card"><div class="stat-skeleton" id="skel-m"></div><div class="stat-value" id="meteo-count" style="display:none">-</div><div class="stat-label">Meteo Observations</div></div>
+            <div class="stat-card"><div class="stat-skeleton" id="skel-h"></div><div class="stat-value" id="hydro-count" style="display:none">-</div><div class="stat-label">Hydro Observations</div></div>
+            <div class="stat-card"><div class="stat-skeleton" id="skel-src"></div><div class="stat-value" id="source-count" style="display:none">-</div><div class="stat-label">Data Sources</div></div>
+        </div>
+        <div class="nav-grid">
+            <div class="nav-card"><h3>📊 Interactive Charts</h3><p>Visualize water levels, wind speed, and other parameters over time.</p><a href="/charts" class="btn">View Charts</a></div>
+            <div class="nav-card"><h3>🗺️ Station Map</h3><p>Explore weather stations on an interactive map.</p><a href="/map" class="btn">Open Map</a></div>
+            <div class="nav-card"><h3>📈 Data Browser</h3><p>Browse, filter, and export meteorological and hydrographic data.</p><a href="/data" class="btn">Browse Data</a></div>
+            <div class="nav-card"><h3>🌊 Tidal Analysis</h3><p>Advanced harmonic tidal analysis with predictions.</p><a href="/tidal" class="btn">Analyze Tides</a></div>
+            <div class="nav-card"><h3>🔧 System Status</h3><p>Monitor system health, data collection status.</p><a href="/status" class="btn">Check Status</a></div>
+        </div>
+        <div class="status" id="system-status"><div class="status-dot status-ok"></div><span>Loading...</span></div>
+    </div>
+<script>
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',4000)}
+function reveal(id,val){const skel=document.getElementById('skel-'+id);const el=document.getElementById(id+'-count')||document.getElementById(id);if(skel)skel.style.display='none';if(el){el.style.display='';el.textContent=typeof val==='number'?val.toLocaleString():val}}
+async function loadStats(){
+    try{
+        const[counts,health]=await Promise.all([fetch('/api/counts').then(r=>r.json()),fetch('/api/health').then(r=>r.json())]);
+        reveal('skel-s','stations');reveal('stations',counts.stations);
+        reveal('skel-m','meteo');reveal('meteo',counts.meteo_observations);
+        reveal('skel-h','hydro');reveal('hydro',counts.hydro_observations);
+        reveal('skel-src','source');reveal('source',health.sources?health.sources.length:1);
+        const ok=health.status==='ok'&&health.db_pool==='connected';
+        document.getElementById('system-status').innerHTML=`<div class="status-dot ${ok?'status-ok':'status-error'}"></div><span>${ok?'All systems operational':'Issues detected'}</span>`;
+    }catch(e){showToast('Failed to load stats: '+e.message);document.getElementById('system-status').innerHTML='<div class="status-dot status-error"></div><span>Connection error</span>'}
+}
+loadStats();setInterval(loadStats,30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIS Data Charts</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh}
+        .container{max-width:1400px;margin:0 auto;padding:20px}
+        .header{text-align:center;margin-bottom:30px;color:#fff}
+        .header h1{font-size:2.5rem;margin-bottom:10px;text-shadow:0 2px 4px rgba(0,0,0,.3)}
+        .nav-link{color:rgba(255,255,255,.8);text-decoration:none}.nav-link:hover{color:#fff}
+        .controls{background:#fff;padding:20px;border-radius:12px;margin-bottom:20px;box-shadow:0 4px 15px rgba(0,0,0,.1)}
+        .controls h3{margin-bottom:15px;color:#333}
+        .control-group{display:flex;gap:15px;align-items:center;flex-wrap:wrap}
+        .control-group label{font-weight:500}
+        .control-group select,.control-group input{padding:8px 12px;border:1px solid #ddd;border-radius:6px}
+        .btn{background:linear-gradient(45deg,#667eea,#764ba2);color:#fff;padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:500}
+        .btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(102,126,234,.4)}
+        .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+        .chart-container{background:#fff;padding:20px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.1)}
+        .chart-container h3{margin-bottom:15px;color:#333;text-align:center}
+        .toast{position:fixed;top:20px;right:20px;background:#ef4444;color:#fff;padding:12px 20px;border-radius:8px;display:none;z-index:9999}
+        @media(max-width:768px){.chart-grid{grid-template-columns:1fr}.control-group{flex-direction:column;align-items:stretch}}
+    </style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<div class="container">
+    <div class="header">
+        <a href="/" class="nav-link">← Back to Dashboard</a>
+        <h1>📊 Interactive Charts</h1>
+    </div>
+    <div class="controls">
+        <h3>Chart Controls</h3>
+        <div class="control-group">
+            <label>Station:</label>
+            <select id="station-select"><option value="">All stations</option></select>
+            <label>Points:</label>
+            <select id="limit-select">
+                <option value="100">100</option><option value="500" selected>500</option>
+                <option value="1000">1000</option><option value="2000">2000</option>
+            </select>
+            <label>From:</label><input type="datetime-local" id="start-input">
+            <label>To:</label><input type="datetime-local" id="end-input">
+            <button class="btn" onclick="loadCharts()">Update</button>
+        </div>
+    </div>
+    <div class="chart-grid">
+        <div class="chart-container"><h3>💨 Wind Speed</h3><div id="windChart"></div></div>
+        <div class="chart-container"><h3>🌊 Water Level</h3><div id="waterChart"></div></div>
+    </div>
+    <div class="chart-container"><h3>🧭 Wind Direction</h3><div id="windDirChart"></div></div>
+</div>
+<script>
+function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',4000)}
+
+// Populate station dropdown dynamically
+async function loadStations(){
+    try{
+        const stations=await fetch('/api/stations').then(r=>r.json());
+        const sel=document.getElementById('station-select');
+        stations.forEach(s=>{const o=document.createElement('option');o.value=s.mmsi;o.textContent=s.mmsi+' — '+(s.country||'Unknown')+' ('+s.lat.toFixed(2)+', '+s.lon.toFixed(2)+')';sel.appendChild(o)});
+    }catch(e){showToast('Failed to load stations')}
+}
+
+function buildParams(){
+    const mmsi=document.getElementById('station-select').value;
+    const limit=document.getElementById('limit-select').value;
+    const start=document.getElementById('start-input').value;
+    const end=document.getElementById('end-input').value;
+    let p='?limit='+limit;
+    if(mmsi)p+='&mmsi='+mmsi;
+    if(start)p+='&start='+new Date(start).toISOString();
+    if(end)p+='&end='+new Date(end).toISOString();
+    return p;
+}
+
+async function loadCharts(){
+    const p=buildParams();
+    try{
+        const[meteo,hydro]=await Promise.all([fetch('/api/meteo'+p).then(r=>r.json()),fetch('/api/hydro'+p).then(r=>r.json())]);
+        // Wind speed
+        const ws=meteo.filter(d=>d.wspeed!==null).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+        Plotly.newPlot('windChart',[{x:ws.map(d=>d.ts),y:ws.map(d=>d.wspeed),mode:'lines',name:'Wind Speed (m/s)',line:{color:'rgb(75,192,192)',width:2},fill:'tozeroy'}],{xaxis:{title:'Time'},yaxis:{title:'m/s',rangemode:'tozero'},margin:{t:10}},{responsive:true});
+
+        // Water level
+        const wl=hydro.filter(d=>d.waterlevel!==null).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+        Plotly.newPlot('waterChart',[{x:wl.map(d=>d.ts),y:wl.map(d=>d.waterlevel),mode:'lines',name:'Water Level (m)',line:{color:'rgb(54,162,235)',width:2},fill:'tozeroy'}],{xaxis:{title:'Time'},yaxis:{title:'m'},margin:{t:10}},{responsive:true});
+
+        // Wind direction polar
+        const dirs=['N','NE','E','SE','S','SW','W','NW'];
+        const counts=Array(8).fill(0);
+        meteo.filter(d=>d.wdir!==null).forEach(d=>{counts[Math.floor(((d.wdir+22.5)%360)/45)]++});
+        Plotly.newPlot('windDirChart',[{type:'barpolar',r:counts,theta:dirs,marker:{color:counts,colorscale:'Viridis'}}],{polar:{radialaxis:{visible:true}},margin:{t:30}},{responsive:true});
+    }catch(e){showToast('Failed to load charts: '+e.message)}
+}
+
+loadStations().then(loadCharts);
+</script>
+</body>
+</html>

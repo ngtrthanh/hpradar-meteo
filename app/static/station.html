@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Station Detail</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh}
+        .container{max-width:1200px;margin:0 auto;padding:20px}
+        .header{text-align:center;margin-bottom:30px;color:#fff}
+        .header h1{font-size:2rem;margin-bottom:10px;text-shadow:0 2px 4px rgba(0,0,0,.3)}
+        .nav-link{color:rgba(255,255,255,.8);text-decoration:none}.nav-link:hover{color:#fff}
+        .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-bottom:20px}
+        .card{background:#fff;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.1)}
+        .card h3{margin-bottom:15px;color:#333}
+        .item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0f0}
+        .item:last-child{border-bottom:none}
+        .val{font-weight:600}
+        .q0{color:#22c55e}.q1{color:#f59e0b}.q2{color:#ef4444}.q3{color:#9ca3af}
+        .chart-card{background:#fff;padding:20px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.1);margin-bottom:20px}
+        .loading{text-align:center;padding:40px;color:#fff;font-size:1.2rem}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <a href="/" class="nav-link">← Dashboard</a> &nbsp; <a href="/map" class="nav-link">← Map</a>
+        <h1 id="title">🌊 Station Detail</h1>
+    </div>
+    <div id="content" class="loading">Loading station data...</div>
+</div>
+<script>
+const mmsi = new URLSearchParams(window.location.search).get('mmsi');
+if (!mmsi) { document.getElementById('content').textContent = 'No MMSI specified. Use ?mmsi=XXXXXXXXX'; }
+else load();
+
+async function load() {
+    try {
+        const [detail, meteo, hydro] = await Promise.all([
+            fetch('/api/stations/' + mmsi).then(r => { if (!r.ok) throw new Error('Station not found'); return r.json(); }),
+            fetch('/api/meteo?mmsi=' + mmsi + '&limit=500').then(r => r.json()),
+            fetch('/api/hydro?mmsi=' + mmsi + '&limit=500').then(r => r.json()),
+        ]);
+        const s = detail.station;
+        document.getElementById('title').textContent = '🌊 Station ' + mmsi;
+        const qLabels = { 0: 'Good', 1: 'Suspect', 2: 'Bad', 3: 'Missing' };
+        const qClass = { 0: 'q0', 1: 'q1', 2: 'q2', 3: 'q3' };
+
+        let html = '<div class="grid">';
+        html += '<div class="card"><h3>📍 Station Info</h3>';
+        html += item('MMSI', s.mmsi) + item('Location', s.lat.toFixed(4) + ', ' + s.lon.toFixed(4));
+        html += item('Country', s.country || 'Unknown') + item('DAC/FI', (s.dac||'-') + ' / ' + (s.fi||'-'));
+        html += item('Meteo records', detail.meteo_count) + item('Hydro records', detail.hydro_count);
+        html += '</div>';
+
+        html += '<div class="card"><h3>📊 Latest Readings</h3>';
+        if (detail.latest_meteo) {
+            const m = detail.latest_meteo;
+            html += item('Wind speed', (m.wspeed ?? 'N/A') + ' m/s') + item('Wind dir', (m.wdir ?? 'N/A') + '°');
+            html += item('Meteo quality', '<span class="' + qClass[m.quality] + '">' + qLabels[m.quality] + '</span>');
+            html += item('Meteo time', new Date(m.ts).toLocaleString());
+        }
+        if (detail.latest_hydro) {
+            const h = detail.latest_hydro;
+            html += item('Water level', (h.waterlevel ?? 'N/A') + ' m') + item('Sea state', h.seastate ?? 'N/A');
+            html += item('Hydro quality', '<span class="' + qClass[h.quality] + '">' + qLabels[h.quality] + '</span>');
+            html += item('Hydro time', new Date(h.ts).toLocaleString());
+        }
+        if (!detail.latest_meteo && !detail.latest_hydro) html += '<p>No readings yet</p>';
+        html += '</div>';
+
+        html += '<div class="card"><h3>🔍 Data Quality</h3>';
+        const qd = {};
+        detail.quality_distribution.forEach(r => { qd[r.quality] = (qd[r.quality] || 0) + r.cnt; });
+        [0,1,2,3].forEach(q => { if (qd[q]) html += item(qLabels[q], '<span class="' + qClass[q] + '">' + qd[q] + '</span>'); });
+        html += '</div></div>';
+
+        // Charts
+        html += '<div class="chart-card"><div id="meteoChart"></div></div>';
+        html += '<div class="chart-card"><div id="hydroChart"></div></div>';
+
+        document.getElementById('content').innerHTML = html;
+
+        // Plot meteo
+        const ws = meteo.filter(d => d.wspeed !== null).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+        if (ws.length) {
+            Plotly.newPlot('meteoChart', [{
+                x: ws.map(d => d.ts), y: ws.map(d => d.wspeed),
+                mode: 'lines', name: 'Wind Speed (m/s)', line: { color: '#667eea' }, fill: 'tozeroy'
+            }], { title: 'Wind Speed', xaxis: { title: 'Time' }, yaxis: { title: 'm/s' }, margin: { t: 40 } }, { responsive: true });
+        }
+
+        // Plot hydro
+        const wl = hydro.filter(d => d.waterlevel !== null).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+        if (wl.length) {
+            Plotly.newPlot('hydroChart', [{
+                x: wl.map(d => d.ts), y: wl.map(d => d.waterlevel),
+                mode: 'lines', name: 'Water Level (m)', line: { color: '#3b82f6' }, fill: 'tozeroy'
+            }], { title: 'Water Level', xaxis: { title: 'Time' }, yaxis: { title: 'm' }, margin: { t: 40 } }, { responsive: true });
+        }
+
+    } catch (e) { document.getElementById('content').textContent = 'Error: ' + e.message; }
+}
+
+function item(label, val) { return '<div class="item"><span>' + label + '</span><span class="val">' + val + '</span></div>'; }
+</script>
+</body>
+</html>
