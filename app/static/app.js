@@ -64,11 +64,11 @@ function syncMK(){
     if(MK[s.mmsi]){MK[s.mmsi].setLngLat([s.lon,s.lat]);return}
     const el=document.createElement('div');
     const c=C[i%C.length];
-    el.style.cssText=`width:12px;height:12px;border-radius:50%;background:${c};border:2px solid #080c14;box-shadow:0 0 10px ${c}80;cursor:pointer;transition:transform .15s`;
+    el.style.cssText=`width:12px;height:12px;border-radius:50%;background:${c};border:2px solid #080c14;box-shadow:0 0 10px ${c}80;cursor:pointer;transition:transform .15s;transform-origin:center center`;
     el.onmouseenter=()=>{el.style.transform='scale(1.8)';showPop(s)};
     el.onmouseleave=()=>{el.style.transform='scale(1)';popup.remove()};
     el.onclick=()=>pick(s.mmsi);
-    MK[s.mmsi]=new maplibregl.Marker({element:el}).setLngLat([s.lon,s.lat]).addTo(map);
+    MK[s.mmsi]=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([s.lon,s.lat]).addTo(map);
   });
 }
 
@@ -110,6 +110,7 @@ async function pick(mmsi){
     const on=Number(k)===sel;
     e.style.transform=on?'scale(2)':'scale(1)';
     e.style.zIndex=on?'10':'1';
+    e.style.transformOrigin='center center';
   });
   if(sel)await loadDetail(sel);
   else $('sdet').classList.remove('show');
