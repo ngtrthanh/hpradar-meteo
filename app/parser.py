@@ -51,6 +51,16 @@ def parse_message(obj: dict) -> tuple[Optional[MeteoHydroPoint], Optional[str]]:
         waterlevel = msg.get("waterlevel")
         seastate = msg.get("seastate")
 
+        # Strip AIS "not available" sentinel values (IMO Circ.289)
+        if seastate is not None and seastate >= 13:
+            seastate = None
+        if wspeed is not None and wspeed >= 127:
+            wspeed = None
+        if wdir is not None and wdir >= 360:
+            wdir = None
+        if waterlevel is not None and (waterlevel >= 327 or waterlevel <= -327):
+            waterlevel = None
+
         if wspeed is None and wdir is None and waterlevel is None and seastate is None:
             return None, Rejection.NO_DATA
 

@@ -3,11 +3,12 @@ import logging
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 
 import config
 import db
 import poller
+import ws as wshub
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -183,11 +184,25 @@ async def health():
     pool = await db.get_pool() if db._pool else None
     return {
         "status": "ok",
-        "sources": config.FETCH_URLS,
-        "poll_interval": config.POLL_INTERVAL,
+        "sources": [{"url": s["url"], "interval": s["interval"]} for s in config.SOURCES],
         "db_pool": "connected" if pool else "disconnected",
         "poller": "running" if poller.is_running() else "stopped",
+        "ws_clients": len(wshub._clients),
     }
+
+
+@router.websocket("/ws/live")
+async def websocket_live(websocket: WebSocket):
+    """Real-time data push. Clients receive new_data messages on each poll cycle."""
+    await wshub.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive; client can send pings
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await wshub.disconnect(websocket)
 
 
 @router.get("/debug/fetch")

@@ -17,7 +17,8 @@ let curLayer='Dark';
 document.addEventListener('DOMContentLoaded',async()=>{
   initMap();buildLayerSw();
   await go();
-  setInterval(go,30000);
+  initWS();
+  setInterval(go,60000); // fallback poll every 60s
 });
 async function go(){await Promise.all([loadNav(),loadStations(),loadRight()])}
 
@@ -26,7 +27,8 @@ async function loadNav(){
   try{
     const[c,h]=await Promise.all([J('/counts'),J('/health')]);
     $('n_s').textContent=fmt(c.stations);$('n_m').textContent=fmt(c.meteo_observations);$('n_h').textContent=fmt(c.hydro_observations);
-    $('hd').className='dot'+((h.db_pool==='connected'&&h.poller==='running')?'':' off');
+    const ok=h.db_pool==='connected'&&h.poller==='running';
+    $('hd').className='dot'+(ok?'':' off');
   }catch(e){$('hd').className='dot off'}
 }
 
@@ -301,13 +303,14 @@ async function windRose(el){
 async function sysPanel(el){
   try{
     const h=await J('/health');
+    const srcs=(h.sources||[]).map(s=>typeof s==='string'?{url:s,interval:'?'}:s);
     el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
       ${sc('Database',h.db_pool==='connected'?'● Connected':'● Down',h.db_pool==='connected')}
       ${sc('Poller',h.poller==='running'?'● Running':'● Stopped',h.poller==='running')}
-      ${sc('Interval',h.poll_interval+'s',true)}
+      ${sc('WS Clients',h.ws_clients??0,true)}
       <div style="grid-column:1/-1;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:14px">
         <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:6px;font-weight:700">Sources</div>
-        ${(h.sources||[]).map(s=>`<div style="padding:2px 0;font-size:.78rem;color:var(--t2)">● ${s}</div>`).join('')}
+        ${srcs.map(s=>`<div style="padding:3px 0;font-size:.78rem;color:var(--t2)">● ${s.url} <span style="color:var(--neon)">${s.interval}s</span></div>`).join('')}
       </div></div>`;
   }catch(e){el.innerHTML='<div class="empty">Unavailable</div>'}
 }
@@ -330,6 +333,32 @@ function ago(ts){
   if(ms<864e5)return Math.floor(ms/36e5)+'h';
   return new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric'});
 }
+
+// ── WEBSOCKET REAL-TIME ──
+let _ws=null,_wsRetry=1;
+function initWS(){
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  _ws=new WebSocket(`${proto}//${location.host}/api/ws/live`);
+  _ws.onopen=()=>{_wsRetry=1;logger('WS connected')};
+  _ws.onmessage=e=>{
+    try{
+      const msg=JSON.parse(e.data);
+      if(msg.type==='new_data'){
+        logger(`Live: ${msg.count} new points`);
+        // Refresh nav counts + right panel
+        loadNav();loadRight();
+        // Flash the health dot
+        const dot=$('hd');if(dot){dot.style.boxShadow='0 0 20px rgba(0,255,170,.8)';setTimeout(()=>dot.style.boxShadow='',500)}
+      }
+    }catch(err){}
+  };
+  _ws.onclose=()=>{
+    logger('WS disconnected, retry in '+_wsRetry+'s');
+    setTimeout(()=>{_wsRetry=Math.min(_wsRetry*2,30);initWS()},_wsRetry*1000);
+  };
+  _ws.onerror=()=>_ws.close();
+}
+function logger(msg){if(typeof console!=='undefined')console.log('[TideWatch]',msg)}
 
 // ── MOBILE BOTTOM SHEET SWIPE ──
 (function(){
