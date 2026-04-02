@@ -39,3 +39,7 @@ jobs:
             git pull origin main
             docker compose up -d --build
             docker image prune -f
+            # Verify
+            sleep 10
+            curl -sf http://localhost:8111/api/health || echo "Health check failed"
+            echo "Deployed to tide.hpradar.com"

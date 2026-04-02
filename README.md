@@ -6,7 +6,7 @@ Real-time maritime meteorological and hydrographic data collection from AIS (Aut
 
 ## Live Demo
 
-Accessible via Cloudflare Tunnel at your configured public hostname.
+**[tide.hpradar.com](https://tide.hpradar.com)** — published via Cloudflare Tunnel.
 
 ## Features
 
@@ -98,27 +98,20 @@ All config via environment variables (or `.env` file):
 
 ## Cloudflare Tunnel
 
-The app is exposed via Cloudflare Tunnel. See `cloudflared` config below.
+The app is published at `tide.hpradar.com` via Cloudflare Tunnel running as a Docker service.
 
-```yaml
-# ~/.cloudflared/config.yml
-tunnel: <your-tunnel-id>
-credentials-file: ~/.cloudflared/<tunnel-id>.json
+### Setup
 
-ingress:
-  - hostname: meteo.yourdomain.com
-    service: http://localhost:8111
-    originRequest:
-      noTLSVerify: true
-  - service: http_status:404
-```
+1. Create a tunnel in Cloudflare Zero Trust dashboard
+2. Add a public hostname: `tide.hpradar.com` → `http://hydro-api:8000`
+3. Copy the tunnel token
+4. Add to `.env`:
+   ```
+   CF_TUNNEL_TOKEN=eyJhIjoiNjQ1...your-token
+   ```
+5. `docker compose up -d` — cloudflared starts automatically after hydro-api is healthy
 
-```bash
-# Install & run
-cloudflared tunnel run <tunnel-name>
-```
-
-WebSocket works through CF Tunnel automatically — no extra config needed.
+WebSocket (`/api/ws/live`) works through CF Tunnel automatically.
 
 ## Development
 
