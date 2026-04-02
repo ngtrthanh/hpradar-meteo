@@ -123,7 +123,7 @@ async def batch_upsert(points):
                       lat=EXCLUDED.lat, country=EXCLUDED.country
             """, [(p.mmsi, p.dac, p.fi, p.lon, p.lat, p.country) for p in points])
 
-            # Meteo batch with quality
+            # Meteo: only if we have actual wind data
             meteo = [(p.mmsi, p.ts, p.wspeed, p.wdir)
                      for p in points if p.wspeed is not None or p.wdir is not None]
             if meteo:
@@ -133,9 +133,9 @@ async def batch_upsert(points):
                     ON CONFLICT (mmsi, ts) DO NOTHING
                 """, meteo)
 
-            # Hydro batch with quality
+            # Hydro: only if we have actual waterlevel
             hydro = [(p.mmsi, p.ts, p.waterlevel, p.seastate)
-                     for p in points if p.waterlevel is not None or p.seastate is not None]
+                     for p in points if p.waterlevel is not None]
             if hydro:
                 await conn.executemany("""
                     INSERT INTO hydro_obs (mmsi, ts, waterlevel, seastate)

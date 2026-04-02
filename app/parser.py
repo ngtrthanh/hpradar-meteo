@@ -6,6 +6,22 @@ from models import MeteoHydroPoint
 
 logger = logging.getLogger(__name__)
 
+# AIS "not available" sentinel values (IMO Circ.289 / ITU-R M.1371)
+_SENTINELS = {
+    "seastate": lambda v: v is None or v >= 13,
+    "wspeed": lambda v: v is None or v >= 127,
+    "wdir": lambda v: v is None or v >= 360,
+    "waterlevel": lambda v: v is None or v >= 327 or v <= -327,
+}
+
+# Physically impossible values
+_BOUNDS = {
+    "wspeed": (0, 100),        # m/s — cat 5 hurricane ~70
+    "wdir": (0, 359),
+    "waterlevel": (-15, 25),   # metres
+    "seastate": (0, 9),
+}
+
 
 class Rejection:
     WRONG_TYPE = "wrong_type"
@@ -14,12 +30,12 @@ class Rejection:
     NOT_SCALED = "not_scaled"
     NO_COORDS = "no_coords"
     BAD_MMSI = "bad_mmsi"
-    NO_TIMESTAMP = "no_timestamp"
     NO_DATA = "no_data"
+    BAD_QUALITY = "bad_quality"
 
 
 def parse_message(obj: dict) -> tuple[Optional[MeteoHydroPoint], Optional[str]]:
-    """Parse an AIS message dict. Returns (point, None) on success or (None, reason)."""
+    """Parse AIS message. Returns (point, None) on success or (None, reason)."""
     try:
         msg = obj.get("message", obj)
 
@@ -41,26 +57,17 @@ def parse_message(obj: dict) -> tuple[Optional[MeteoHydroPoint], Optional[str]]:
         if not mmsi or mmsi == 0:
             return None, Rejection.BAD_MMSI
 
-        # Parse timestamp — try object level then message level
         ts = _parse_ts(obj) or _parse_ts(msg)
         if not ts:
             ts = datetime.now(timezone.utc)
 
-        wspeed = msg.get("wspeed")
-        wdir = msg.get("wdir")
-        waterlevel = msg.get("waterlevel")
-        seastate = msg.get("seastate")
+        # Extract and clean fields
+        wspeed = _clean("wspeed", msg.get("wspeed"))
+        wdir = _clean("wdir", msg.get("wdir"))
+        waterlevel = _clean("waterlevel", msg.get("waterlevel"))
+        seastate = _clean("seastate", msg.get("seastate"))
 
-        # Strip AIS "not available" sentinel values (IMO Circ.289)
-        if seastate is not None and seastate >= 13:
-            seastate = None
-        if wspeed is not None and wspeed >= 127:
-            wspeed = None
-        if wdir is not None and wdir >= 360:
-            wdir = None
-        if waterlevel is not None and (waterlevel >= 327 or waterlevel <= -327):
-            waterlevel = None
-
+        # Reject if nothing useful remains
         if wspeed is None and wdir is None and waterlevel is None and seastate is None:
             return None, Rejection.NO_DATA
 
@@ -75,6 +82,20 @@ def parse_message(obj: dict) -> tuple[Optional[MeteoHydroPoint], Optional[str]]:
     except Exception as e:
         logger.error("Parse error: %s", e, exc_info=True)
         return None, str(e)
+
+
+def _clean(field: str, val) -> Optional[float]:
+    """Strip sentinel values and out-of-bounds readings. Returns None if bad."""
+    if val is None:
+        return None
+    # Sentinel check
+    if _SENTINELS.get(field, lambda v: False)(val):
+        return None
+    # Bounds check
+    bounds = _BOUNDS.get(field)
+    if bounds and (val < bounds[0] or val > bounds[1]):
+        return None
+    return val
 
 
 def _parse_ts(d: dict) -> Optional[datetime]:
