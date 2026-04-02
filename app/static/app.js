@@ -498,43 +498,94 @@ async function dayOverlay(el){
 
 // ── TIDAL PREDICTION ──
 async function predictPanel(el){
-  const mmsi=sel||995741977; // default to Lạch Huyện
+  const mmsi=sel||995741977;
   const s=STN.find(x=>x.mmsi===mmsi);
   const nm=s?sname(s)||mmsi:mmsi;
-  el.innerHTML=`<div class="cgrid" style="grid-template-columns:1fr 300px">
-    <div class="cbox" style="height:auto;min-height:280px"><div class="ct" style="color:var(--neon)">🔮 ${nm} — Observed + Predicted</div><div class="cp" id="pred-chart"></div></div>
-    <div class="cbox" style="height:auto;min-height:280px"><div class="ct">Top Constituents</div><div id="pred-info" style="font-size:.78rem;color:var(--t2)">Loading analysis...</div></div>
+  el.innerHTML=`<div class="cgrid" style="grid-template-columns:1fr 280px">
+    <div class="cbox" style="height:auto;min-height:280px"><div class="ct" style="color:var(--neon)">🔮 ${nm} — Tide Prediction (48h)</div><div class="cp" id="pred-chart"></div></div>
+    <div class="cbox" style="height:auto;min-height:280px;overflow-y:auto"><div class="ct">Analysis</div><div id="pred-info" style="font-size:.78rem;color:var(--t2)">Loading...</div></div>
   </div>`;
   await new Promise(r=>setTimeout(r,100));
   try{
-    // Fetch observed + prediction in parallel
     const[obs,pred]=await Promise.all([
       J(`/hydro?mmsi=${mmsi}&limit=2000`),
       J(`/tidal/predict/${mmsi}?hours=48`)
     ]);
     const obsS=obs.filter(r=>r.waterlevel!=null).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    const predPts=pred.predictions;
+
+    // Find predicted highs/lows
+    const highs=[],lows=[];
+    for(let i=1;i<predPts.length-1;i++){
+      const prev=predPts[i-1].level,cur=predPts[i].level,next=predPts[i+1].level;
+      if(cur>prev&&cur>next)highs.push(predPts[i]);
+      if(cur<prev&&cur<next)lows.push(predPts[i]);
+    }
+
     const traces=[
-      {x:obsS.map(r=>r.ts),y:obsS.map(r=>r.waterlevel),mode:'lines',name:'Observed',line:{color:'#00ffaa',width:2}},
-      {x:pred.predictions.map(r=>r.ts),y:pred.predictions.map(r=>r.level),mode:'lines',name:'Predicted',line:{color:'#ff00aa',width:2,dash:'dot'}}
+      {x:obsS.map(r=>r.ts),y:obsS.map(r=>r.waterlevel),mode:'lines',name:'Observed',
+       line:{color:'#00ffaa',width:2},fill:'tozeroy',fillcolor:'rgba(0,255,170,0.05)'},
+      {x:predPts.map(r=>r.ts),y:predPts.map(r=>r.level),mode:'lines',name:'Predicted',
+       line:{color:'#ff00aa',width:2.5,dash:'dot'},fill:'tozeroy',fillcolor:'rgba(255,0,170,0.05)'},
     ];
-    // Add vertical line at prediction start
+    // High water markers
+    if(highs.length)traces.push({
+      x:highs.map(h=>h.ts),y:highs.map(h=>h.level),mode:'markers+text',name:'High Water',
+      marker:{color:'#ffcc00',size:10,symbol:'triangle-up'},
+      text:highs.map(h=>h.level.toFixed(2)+'m'),textposition:'top center',
+      textfont:{color:'#ffcc00',size:10}
+    });
+    // Low water markers
+    if(lows.length)traces.push({
+      x:lows.map(l=>l.ts),y:lows.map(l=>l.level),mode:'markers+text',name:'Low Water',
+      marker:{color:'#00d4ff',size:10,symbol:'triangle-down'},
+      text:lows.map(l=>l.level.toFixed(2)+'m'),textposition:'bottom center',
+      textfont:{color:'#00d4ff',size:10}
+    });
+
     const predStart=pred.observed_end;
     Plotly.newPlot('pred-chart',traces,{
       ...pLayout('m'),showlegend:true,
-      legend:{font:{color:'#a0b4d0',size:10},bgcolor:'transparent'},
-      shapes:[{type:'line',x0:predStart,x1:predStart,y0:0,y1:1,yref:'paper',line:{color:'#ffcc00',width:1,dash:'dash'}}],
-      annotations:[{x:predStart,y:1,yref:'paper',text:'Now →',showarrow:false,font:{color:'#ffcc00',size:10},xanchor:'left'}]
+      legend:{font:{color:'#a0b4d0',size:9},bgcolor:'transparent',orientation:'h',y:1.05},
+      shapes:[{type:'line',x0:predStart,x1:predStart,y0:0,y1:1,yref:'paper',
+               line:{color:'#ffcc00',width:1.5,dash:'dash'}},
+              {type:'rect',x0:predStart,x1:pred.predict_end,y0:0,y1:1,yref:'paper',
+               fillcolor:'rgba(255,0,170,0.03)',line:{width:0}}],
+      annotations:[{x:predStart,y:1.02,yref:'paper',text:'◀ Observed | Predicted ▶',
+                    showarrow:false,font:{color:'#ffcc00',size:10}}]
     },{responsive:true});
-    // Info panel
-    let info=`<div style="margin-bottom:12px">
-      <div style="color:var(--neon);font-weight:700;font-size:1rem">R² = ${pred.r2.toFixed(4)}</div>
-      <div>RMSE = ${pred.rmse.toFixed(4)} m</div>
-      <div>${pred.n_constituents} constituents</div>
-      <div>Predicting ${48}h ahead</div>
+
+    // Info panel — current level + extremes + constituents
+    const lastObs=obsS[obsS.length-1];
+    const prevObs=obsS.length>1?obsS[obsS.length-2]:null;
+    const trend=prevObs?(lastObs.waterlevel>prevObs.waterlevel?'▲ Rising':'▼ Falling'):'';
+    const trendColor=trend.includes('Rising')?'var(--neon)':'var(--red)';
+
+    let info=`<div style="text-align:center;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
+      <div style="font-size:.65rem;text-transform:uppercase;color:var(--t3)">Current Level</div>
+      <div style="font-size:1.8rem;font-weight:800;color:var(--cyan)">${lastObs?lastObs.waterlevel.toFixed(2):'—'} m</div>
+      <div style="font-size:.75rem;color:${trendColor}">${trend}</div>
+      <div style="font-size:.65rem;color:var(--t3)">${lastObs?ago(lastObs.ts):''}</div>
     </div>`;
-    info+='<table class="rt"><thead><tr><th>Name</th><th>Amp (m)</th><th>Phase °</th><th>°/hr</th></tr></thead><tbody>';
+
+    // Next high/low
+    if(highs.length){
+      const nh=highs[0];
+      info+=`<div style="padding:4px 0;font-size:.78rem"><span style="color:var(--yellow)">▲ Next HW:</span> ${nh.level.toFixed(2)}m at ${new Date(nh.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>`;
+    }
+    if(lows.length){
+      const nl=lows[0];
+      info+=`<div style="padding:4px 0;font-size:.78rem"><span style="color:var(--cyan)">▼ Next LW:</span> ${nl.level.toFixed(2)}m at ${new Date(nl.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>`;
+    }
+
+    info+=`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+      <div style="color:var(--neon);font-weight:700">R² = ${pred.r2.toFixed(4)}</div>
+      <div>RMSE = ${(pred.rmse*100).toFixed(1)} cm</div>
+      <div>${pred.n_constituents} constituents</div>
+    </div>`;
+    info+='<table class="rt" style="margin-top:8px"><thead><tr><th>Name</th><th>Amp</th><th>Phase</th></tr></thead><tbody>';
     pred.top_constituents.forEach(([name,c])=>{
-      info+=`<tr><td style="font-weight:700">${name}</td><td class="hi">${c.amp.toFixed(4)}</td><td>${c.phase.toFixed(1)}</td><td>${c.freq.toFixed(4)}</td></tr>`;
+      info+=`<tr><td style="font-weight:700">${name}</td><td class="hi">${(c.amp*100).toFixed(1)}cm</td><td>${c.phase.toFixed(0)}°</td></tr>`;
     });
     info+='</tbody></table>';
     $('pred-info').innerHTML=info;
