@@ -2,7 +2,7 @@ name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging, dev]
   pull_request:
     branches: [main]
 
@@ -23,13 +23,12 @@ jobs:
         run: |
           cd app
           python -m py_compile config.py db.py main.py middleware.py models.py parser.py poller.py quality.py ws.py routes/api.py routes/pages.py
-          echo "All Python files OK"
 
   build-and-push:
-    name: Build & Push Production Image
+    name: Build & Push
     needs: lint
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push'
     permissions:
       contents: read
       packages: write
@@ -44,12 +43,22 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Set image tag
+        id: tag
+        run: |
+          BRANCH=${GITHUB_REF#refs/heads/}
+          if [ "$BRANCH" = "main" ]; then TAG=latest
+          elif [ "$BRANCH" = "staging" ]; then TAG=staging
+          else TAG=dev; fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Branch: $BRANCH → Tag: $TAG"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
             ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
