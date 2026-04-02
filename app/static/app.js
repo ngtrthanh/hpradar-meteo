@@ -62,13 +62,19 @@ function syncMK(){
   STN.forEach((s,i)=>{
     if(!s.lat||!s.lon)return;
     if(MK[s.mmsi]){MK[s.mmsi].setLngLat([s.lon,s.lat]);return}
-    const el=document.createElement('div');
     const c=C[i%C.length];
-    el.style.cssText=`width:12px;height:12px;border-radius:50%;background:${c};border:2px solid #080c14;box-shadow:0 0 10px ${c}80;cursor:pointer;transition:transform .15s;transform-origin:center center`;
-    el.onmouseenter=()=>{el.style.transform='scale(1.8)';showPop(s)};
-    el.onmouseleave=()=>{el.style.transform='scale(1)';popup.remove()};
-    el.onclick=()=>pick(s.mmsi);
-    MK[s.mmsi]=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([s.lon,s.lat]).addTo(map);
+    // Outer wrapper: fixed size, centers the dot inside
+    const wrap=document.createElement('div');
+    wrap.style.cssText='width:24px;height:24px;display:flex;align-items:center;justify-content:center;cursor:pointer';
+    // Inner dot
+    const dot=document.createElement('div');
+    dot.style.cssText=`width:12px;height:12px;border-radius:50%;background:${c};border:2px solid #080c14;box-shadow:0 0 10px ${c}80;transition:width .15s,height .15s,box-shadow .15s`;
+    wrap.appendChild(dot);
+    wrap.onmouseenter=()=>{dot.style.width='18px';dot.style.height='18px';dot.style.boxShadow=`0 0 18px ${c}`;showPop(s)};
+    wrap.onmouseleave=()=>{dot.style.width='12px';dot.style.height='12px';dot.style.boxShadow=`0 0 10px ${c}80`;popup.remove()};
+    wrap.onclick=()=>pick(s.mmsi);
+    wrap._dot=dot;wrap._color=c;
+    MK[s.mmsi]=new maplibregl.Marker({element:wrap,anchor:'center'}).setLngLat([s.lon,s.lat]).addTo(map);
   });
 }
 
@@ -106,11 +112,15 @@ async function pick(mmsi){
   renderList();
   // highlight marker — no map pan
   Object.entries(MK).forEach(([k,m])=>{
-    const e=m.getElement();
+    const wrap=m.getElement();
+    const dot=wrap._dot,c=wrap._color;
     const on=Number(k)===sel;
-    e.style.transform=on?'scale(2)':'scale(1)';
-    e.style.zIndex=on?'10':'1';
-    e.style.transformOrigin='center center';
+    if(dot){
+      dot.style.width=on?'20px':'12px';
+      dot.style.height=on?'20px':'12px';
+      dot.style.boxShadow=on?`0 0 22px ${c}`:`0 0 10px ${c}80`;
+    }
+    wrap.style.zIndex=on?'10':'1';
   });
   if(sel)await loadDetail(sel);
   else $('sdet').classList.remove('show');
