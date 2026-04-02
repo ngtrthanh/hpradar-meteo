@@ -93,17 +93,19 @@ async function loadStations(){
 
 function filterList(){searchQ=$('search').value.toLowerCase();renderList()}
 
-// Country → flag emoji via ISO 3166
-const FLAGS={
-  'Vietnam':'🇻🇳','United Kingdom':'🇬🇧','Finland':'🇫🇮','Sweden':'🇸🇪',
-  'Ireland':'🇮🇪','Canada':'🇨🇦','Spain':'🇪🇸','Estonia':'🇪🇪',
-  'Norway':'🇳🇴','Denmark':'🇩🇰','Germany':'🇩🇪','France':'🇫🇷',
-  'Netherlands':'🇳🇱','Belgium':'🇧🇪','Portugal':'🇵🇹','Italy':'🇮🇹',
-  'Greece':'🇬🇷','Poland':'🇵🇱','Latvia':'🇱🇻','Lithuania':'🇱🇹',
-  'Russia':'🇷🇺','China':'🇨🇳','Japan':'🇯🇵','South Korea':'🇰🇷',
-  'Australia':'🇦🇺','New Zealand':'🇳🇿','USA':'🇺🇸','Brazil':'🇧🇷',
+// Country → ISO 3166-1 alpha-2 for flag-icons CSS
+const CC={
+  'Vietnam':'vn','United Kingdom':'gb','Finland':'fi','Sweden':'se',
+  'Ireland':'ie','Canada':'ca','Spain':'es','Estonia':'ee',
+  'Norway':'no','Denmark':'dk','Germany':'de','France':'fr',
+  'Netherlands':'nl','Belgium':'be','Portugal':'pt','Italy':'it',
+  'Greece':'gr','Poland':'pl','Latvia':'lv','Lithuania':'lt',
+  'Russia':'ru','China':'cn','Japan':'jp','South Korea':'kr',
+  'Australia':'au','New Zealand':'nz','USA':'us','Brazil':'br',
+  'India':'in','Thailand':'th','Philippines':'ph','Singapore':'sg',
+  'Malaysia':'my','Indonesia':'id','Turkey':'tr','Croatia':'hr',
 };
-function flag(c){return FLAGS[c]||'🏳️'}
+function flag(c){const code=CC[c];return code?`<span class="fi fi-${code}" style="font-size:.9rem"></span>`:'🏳️'}
 
 function renderList(){
   const f=STN.filter(s=>{
