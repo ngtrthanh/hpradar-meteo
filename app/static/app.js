@@ -152,11 +152,21 @@ function renderList(){
                 (s.has_meteo?'<span title="Wind data" style="color:var(--neon)">💨</span>':'');
     const nm=sname(s);
     const recs=(s.meteo_count||0)+(s.hydro_count||0);
+    const fresh=freshness(s);
     return `<div class="si${s.mmsi===sel?' on':''}" onclick="pick(${s.mmsi})">
-      <div class="nm">${flag(s.country)} <span style="color:${C[ci%C.length]}">${nm||s.mmsi}</span><span class="fl">${icons||'—'}</span></div>
+      <div class="nm"><span class="sdot ${fresh}"></span>${flag(s.country)} <span style="color:${C[ci%C.length]}">${nm||s.mmsi}</span><span class="fl">${icons||'—'}</span></div>
       <div class="sub">${nm?s.mmsi+' · ':''}${s.country||'?'} · ${recs.toLocaleString()} rec</div>
     </div>`;
   }).join(''):'<div class="empty">No match</div>';
+}
+
+function freshness(s){
+  const ts=s.last_hydro_ts||s.last_meteo_ts;
+  if(!ts)return 'dead';
+  const age=Date.now()-new Date(ts).getTime();
+  if(age<600000)return 'fresh';   // <10min
+  if(age<3600000)return 'stale';  // <1h
+  return 'dead';
 }
 
 async function pick(mmsi){
@@ -176,9 +186,35 @@ async function pick(mmsi){
   });
   if(sel)await loadDetail(sel);
   else $('sdet').classList.remove('show');
+  updateCC();
   await loadRight();
   if($('app').classList.contains('bot-open'))await loadBot();
 }
+
+// ── CURRENT CONDITIONS BAR ──
+async function updateCC(){
+  const app=$('app'),bar=$('ccbar');
+  if(!sel){app.classList.remove('has-cc');return}
+  const s=STN.find(x=>x.mmsi===sel);
+  if(!s){app.classList.remove('has-cc');return}
+  try{
+    const[m,h]=await Promise.all([J(`/meteo?mmsi=${sel}&limit=2`),J(`/hydro?mmsi=${sel}&limit=2`)]);
+    const a=m[0],b=h[0];
+    if(!a&&!b){app.classList.remove('has-cc');return}
+    const trend=b&&h[1]?(b.waterlevel>h[1].waterlevel?'<span class="cc-trend" style="color:var(--neon)">▲</span>':'<span class="cc-trend" style="color:var(--red)">▼</span>'):'';
+    const lastTs=b?.ts||a?.ts;
+    bar.innerHTML=`
+      <span class="cc-name">${flag(s.country)} ${sname(s)||s.mmsi}</span>
+      ${b?`<div class="cc-item"><div class="cc-val" style="color:var(--cyan)">${b.waterlevel??'—'}${trend}</div><div class="cc-lbl">Water Level (m)</div></div>`:''}
+      ${a?`<div class="cc-item"><div class="cc-val" style="color:var(--neon)">${a.wspeed??'—'}</div><div class="cc-lbl">Wind (m/s)</div></div>`:''}
+      ${a?`<div class="cc-item"><div class="cc-val">${a.wdir??'—'}°</div><div class="cc-lbl">Direction</div></div>`:''}
+      <span class="cc-age">${ago(lastTs)}</span>
+      <button class="cc-close" onclick="clearCC()">✕</button>`;
+    app.classList.add('has-cc');
+    setTimeout(()=>map.resize(),50);
+  }catch(e){app.classList.remove('has-cc')}
+}
+function clearCC(){sel=null;$('app').classList.remove('has-cc');renderList();$('sdet').classList.remove('show');setTimeout(()=>map.resize(),50)}
 
 async function loadDetail(mmsi){
   const el=$('sdet');
@@ -261,10 +297,19 @@ async function loadRight(){
       el.innerHTML=d.length?`<table class="rt"><thead><tr><th>MMSI</th><th>Level</th><th>Sea</th><th>When</th></tr></thead><tbody>${d.map(r=>`<tr><td>${r.mmsi}</td><td class="hi">${r.waterlevel??'—'}</td><td>${r.seastate??'—'}</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No hydro data</div>';
     }else{
       $('einfo').textContent='';
-      try{const d=await J('/alerts');const ev=d.recent_events||[];
+      try{const d=await J('/alerts');const ev=d.recent_events||[];const al=d.alerts||[];
         lastRightData=ev;
         $('einfo').textContent=ev.length+' events';
-        el.innerHTML=ev.length?`<table class="rt"><thead><tr><th>MMSI</th><th>Val</th><th>When</th></tr></thead><tbody>${ev.slice(0,50).map(e=>`<tr><td>${e.mmsi}</td><td style="color:var(--yellow)">${e.value?.toFixed(2)??'—'}</td><td>${ago(e.triggered_at)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No alerts</div>';
+        let html=`<div class="aform">
+          <select id="af-field"><option value="waterlevel">Water Level</option><option value="wspeed">Wind Speed</option></select>
+          <select id="af-op"><option value=">">&gt;</option><option value="<">&lt;</option><option value=">=">&gt;=</option><option value="<=">&lt;=</option></select>
+          <input id="af-val" type="number" step="0.1" placeholder="Threshold">
+          <button class="abtn" onclick="createAlert()">+ Create Alert${sel?' for '+sel:''}</button>
+        </div>`;
+        if(al.length)html+=al.map(a=>`<div class="alert-item"><span>${a.mmsi||'All'} ${a.field} ${a.operator} ${a.threshold}</span><button class="alert-del" onclick="delAlert(${a.id})">✕</button></div>`).join('');
+        if(ev.length)html+=`<div style="padding:8px 12px;font-size:.68rem;color:var(--t3);text-transform:uppercase;border-bottom:1px solid var(--border)">Recent Events</div>`+
+          ev.slice(0,30).map(e=>`<div class="alert-item"><span>${e.mmsi} = ${e.value?.toFixed(2)??'—'}</span><span style="color:var(--t3)">${ago(e.triggered_at)}</span></div>`).join('');
+        el.innerHTML=html||'<div class="empty">No alerts</div>';
       }catch(e){el.innerHTML='<div class="empty">Alerts unavailable</div>'}
     }
   }catch(e){el.innerHTML='<div class="empty">Load failed</div>'}
@@ -288,12 +333,25 @@ function exportData(fmt){
   a.click();URL.revokeObjectURL(a.href);
 }
 
+// ── ALERTS CRUD ──
+async function createAlert(){
+  const field=$('af-field').value,op=$('af-op').value,val=$('af-val').value;
+  if(!val)return;
+  const q=`?field=${field}&operator=${encodeURIComponent(op)}&threshold=${val}${sel?'&mmsi='+sel:''}`;
+  try{await fetch(A+'/alerts'+q,{method:'POST'});rTab('alerts')}catch(e){}
+}
+async function delAlert(id){
+  try{await fetch(A+'/alerts/'+id,{method:'DELETE'});rTab('alerts')}catch(e){}
+}
+
 // ── BOTTOM ──
 function bTab(t){bCur=t;document.querySelectorAll('[data-b]').forEach(x=>x.classList.toggle('on',x.dataset.b===t));loadBot()}
 async function loadBot(){
   const el=$('bbd');
   if(bCur==='tide')await tidePlots(el);
   else if(bCur==='wind')await windRose(el);
+  else if(bCur==='table')await tideTable(el);
+  else if(bCur==='overlay')await dayOverlay(el);
   else await sysPanel(el);
 }
 
@@ -362,6 +420,81 @@ async function windRose(el){
   }
 }
 
+// ── TIDE TABLE: high/low water detection ──
+async function tideTable(el){
+  const list=(sel?STN.filter(s=>s.mmsi===sel):STN.filter(s=>s.has_hydro)).slice(0,6);
+  if(!list.length){el.innerHTML='<div class="empty">Select a station with hydro data</div>';return}
+  let html='<div style="overflow:auto;padding:4px"><table class="rt" style="font-size:.8rem"><thead><tr><th>Station</th><th>Date</th><th>High Water</th><th>HW Time</th><th>Low Water</th><th>LW Time</th></tr></thead><tbody>';
+  for(const s of list){
+    try{
+      const d=await J(`/hydro?mmsi=${s.mmsi}&limit=2000${trQuery()}`);
+      const pts=d.filter(r=>r.waterlevel!=null).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+      if(pts.length<3)continue;
+      const extremes=findExtremes(pts);
+      const byDay={};
+      extremes.forEach(e=>{
+        const day=e.ts.slice(0,10);
+        if(!byDay[day])byDay[day]={hw:null,lw:null};
+        if(e.type==='high'&&(!byDay[day].hw||e.val>byDay[day].hw.val))byDay[day].hw=e;
+        if(e.type==='low'&&(!byDay[day].lw||e.val<byDay[day].lw.val))byDay[day].lw=e;
+      });
+      const nm=sname(s)||s.mmsi;
+      Object.entries(byDay).sort().reverse().slice(0,7).forEach(([day,v])=>{
+        html+=`<tr><td>${nm}</td><td>${day}</td>`;
+        html+=v.hw?`<td class="hi">${v.hw.val.toFixed(2)}m</td><td>${v.hw.ts.slice(11,16)}</td>`:'<td>—</td><td>—</td>';
+        html+=v.lw?`<td style="color:var(--cyan)">${v.lw.val.toFixed(2)}m</td><td>${v.lw.ts.slice(11,16)}</td>`:'<td>—</td><td>—</td>';
+        html+='</tr>';
+      });
+    }catch(e){}
+  }
+  html+='</tbody></table></div>';
+  el.innerHTML=html;
+}
+
+function findExtremes(pts){
+  const ex=[];
+  for(let i=1;i<pts.length-1;i++){
+    const prev=pts[i-1].waterlevel,cur=pts[i].waterlevel,next=pts[i+1].waterlevel;
+    if(cur>prev&&cur>next)ex.push({type:'high',val:cur,ts:pts[i].ts});
+    if(cur<prev&&cur<next)ex.push({type:'low',val:cur,ts:pts[i].ts});
+  }
+  return ex;
+}
+
+// ── DAY OVERLAY: today vs yesterday vs 2 days ago ──
+async function dayOverlay(el){
+  const list=sel?STN.filter(s=>s.mmsi===sel):STN.filter(s=>s.has_hydro).slice(0,3);
+  if(!list.length){el.innerHTML='<div class="empty">Select a station with hydro data</div>';return}
+  const cols=Math.min(list.length,3);
+  el.innerHTML=`<div class="cgrid" style="grid-template-columns:repeat(${cols},1fr)">${
+    list.map((s,i)=>`<div class="cbox"><div class="ct" style="color:${C[STN.indexOf(s)%C.length]}">${sname(s)||s.mmsi} — Day Overlay</div><div class="cp" id="ov${i}"></div></div>`).join('')
+  }</div>`;
+  await new Promise(r=>setTimeout(r,100));
+  const colors=['#00ffaa','#00d4ff80','#ff00aa60'];
+  const labels=['Today','Yesterday','2 days ago'];
+  for(let i=0;i<list.length;i++){
+    const s=list[i],div=$('ov'+i);
+    if(!div)continue;
+    try{
+      const d=await J(`/hydro?mmsi=${s.mmsi}&limit=5000`);
+      const pts=d.filter(r=>r.waterlevel!=null).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+      const now=new Date();
+      const traces=[0,1,2].map((daysAgo,ti)=>{
+        const dayStart=new Date(now);dayStart.setDate(dayStart.getDate()-daysAgo);dayStart.setHours(0,0,0,0);
+        const dayEnd=new Date(dayStart);dayEnd.setDate(dayEnd.getDate()+1);
+        const dayPts=pts.filter(p=>{const t=new Date(p.ts);return t>=dayStart&&t<dayEnd});
+        return{
+          x:dayPts.map(p=>{const t=new Date(p.ts);return t.getHours()+t.getMinutes()/60}),
+          y:dayPts.map(p=>p.waterlevel),
+          mode:'lines',name:labels[ti],line:{color:colors[ti],width:ti===0?2:1.5}
+        };
+      }).filter(t=>t.x.length>0);
+      if(!traces.length){div.innerHTML='<div class="empty">Not enough data</div>';continue}
+      Plotly.newPlot(div,traces,{...pLayout('m'),xaxis:{...pLayout('m').xaxis,title:{text:'Hour',font:{size:10}},range:[0,24],dtick:3},showlegend:true,legend:{font:{color:'#a0b4d0',size:9},bgcolor:'transparent'}},{responsive:true});
+    }catch(e){div.innerHTML='<div class="empty">Error</div>'}
+  }
+}
+
 // ── SYSTEM ──
 async function sysPanel(el){
   try{
@@ -408,10 +541,17 @@ function initWS(){
       const msg=JSON.parse(e.data);
       if(msg.type==='new_data'){
         logger(`Live: ${msg.count} new points`);
-        // Refresh nav counts + right panel
         loadNav();loadRight();
-        // Flash the health dot
+        // Update current conditions if selected station has new data
+        if(sel&&msg.points?.some(p=>p.mmsi===sel))updateCC();
+        // Flash health dot
         const dot=$('hd');if(dot){dot.style.boxShadow='0 0 20px rgba(0,255,170,.8)';setTimeout(()=>dot.style.boxShadow='',500)}
+        // Flash updated stations in list
+        const updated=new Set(msg.points?.map(p=>p.mmsi)||[]);
+        document.querySelectorAll('.si').forEach(el=>{
+          const mmsi=parseInt(el.querySelector('.nm span[style]')?.textContent);
+          if(updated.has(mmsi)){el.style.background='rgba(0,255,170,.08)';setTimeout(()=>el.style.background='',1500)}
+        });
       }
     }catch(err){}
   };

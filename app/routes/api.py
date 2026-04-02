@@ -66,9 +66,11 @@ async def get_counts(exact: bool = Query(False)):
 
 @router.get("/stations")
 async def get_stations(limit: int = Query(1000)):
+    cached = _cached("stations")
+    if cached:
+        return cached
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # Check if name column exists
         has_name = await conn.fetchval(
             "SELECT COUNT(*) > 0 FROM information_schema.columns "
             "WHERE table_name='stations' AND column_name='name'")
@@ -76,13 +78,22 @@ async def get_stations(limit: int = Query(1000)):
         rows = await conn.fetch(f"""
             SELECT s.mmsi, s.dac, s.fi, s.lon, s.lat, s.country, {name_col}
                    (SELECT COUNT(*) FROM meteo_obs m WHERE m.mmsi = s.mmsi) AS meteo_count,
-                   (SELECT COUNT(*) FROM hydro_obs h WHERE h.mmsi = s.mmsi) AS hydro_count
+                   (SELECT COUNT(*) FROM hydro_obs h WHERE h.mmsi = s.mmsi) AS hydro_count,
+                   (SELECT MAX(ts) FROM meteo_obs m WHERE m.mmsi = s.mmsi) AS last_meteo_ts,
+                   (SELECT MAX(ts) FROM hydro_obs h WHERE h.mmsi = s.mmsi) AS last_hydro_ts
             FROM stations s ORDER BY s.mmsi LIMIT $1
         """, _clamp_limit(limit))
-        return [{**dict(r),
-                 "has_meteo": r["meteo_count"] > 0,
-                 "has_hydro": r["hydro_count"] > 0}
-                for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["has_meteo"] = r["meteo_count"] > 0
+            d["has_hydro"] = r["hydro_count"] > 0
+            for k in ("last_meteo_ts", "last_hydro_ts"):
+                if d[k]:
+                    d[k] = d[k].isoformat()
+            result.append(d)
+        _set_cache("stations", result)
+        return result
 
 
 @router.get("/stations/{mmsi}")

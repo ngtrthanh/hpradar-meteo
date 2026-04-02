@@ -26,6 +26,8 @@
     </div>
   </nav>
 
+  <div class="ccbar" id="ccbar"></div>
+
   <aside class="left" id="pl">
     <div class="lhead"><input id="search" placeholder="Search MMSI / country..." oninput="filterList()"></div>
     <div class="slist" id="slist"></div>
@@ -69,6 +71,8 @@
       <div class="tb">
         <button class="tbtn on" data-b="tide" onclick="bTab('tide')">🌊 Tide</button>
         <button class="tbtn" data-b="wind" onclick="bTab('wind')">💨 Wind Rose</button>
+        <button class="tbtn" data-b="table" onclick="bTab('table')">📋 Tide Table</button>
+        <button class="tbtn" data-b="overlay" onclick="bTab('overlay')">📊 Day Overlay</button>
         <button class="tbtn" data-b="sys" onclick="bTab('sys')">⚙ System</button>
       </div>
       <button class="bclose" onclick="togBot()">✕</button>
