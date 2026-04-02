@@ -222,6 +222,40 @@ async def debug_fetch():
     return {"status": "fetch completed"}
 
 
+@router.get("/station-names")
+async def station_names():
+    """Fetch shipnames from AIS ships_array and map to our station MMSIs."""
+    cached = _cached("station_names")
+    if cached:
+        return cached
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        mmsis = [r["mmsi"] for r in await conn.fetch("SELECT mmsi FROM stations")]
+    mmsi_set = set(mmsis)
+    names = {}
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            for src_url in ["https://aisinfra.hpradar.com", "https://m3.hpradar.com", "https://m4.hpradar.com"]:
+                try:
+                    resp = await client.get(f"{src_url}/api/ships_array.json", timeout=15.0)
+                    if resp.status_code != 200:
+                        continue
+                    raw = resp.json()
+                    rows = raw.get("values", raw) if isinstance(raw, dict) else raw
+                    for row in rows:
+                        if len(row) > 31 and row[0] in mmsi_set and row[31]:
+                            name = str(row[31]).strip()
+                            if name and len(name) > 1:
+                                names[str(row[0])] = name
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    _set_cache("station_names", names)
+    return names
+
+
 @router.get("/alerts")
 async def get_alerts():
     """List active alerts and recent events (Phase 6 item 28)."""

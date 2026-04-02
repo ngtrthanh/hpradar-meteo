@@ -17,6 +17,7 @@ let curLayer='Dark';
 document.addEventListener('DOMContentLoaded',async()=>{
   initMap();buildLayerSw();
   await go();
+  refreshNames();
   initWS();
   setInterval(go,60000); // fallback poll every 60s
 });
@@ -98,22 +99,33 @@ async function loadStations(){
 
 function filterList(){searchQ=$('search').value.toLowerCase();renderList()}
 
-// Station names (reverse geocoded from coordinates)
+// Station names — shipname from AIS, fallback to geocoded location
 const NAMES={
   '2242115':'A Coruña','2300057':'Helsinki','2300059':'Rauma',
   '2655619':'Stockholm','2766100':'Pärnu','2766140':'Pärnu',
   '3160011':'Juan de Fuca','3160029':'Kingston',
-  '992351272':'Grimsby','992351273':'Goole','992351274':'Spurn Head',
-  '992351275':'Immingham','992351276':'New Holland','992351279':'Flixborough',
-  '992351280':'Humber Bridge','992351281':'Hull','992351282':'Keadby',
-  '992351283':'Blacktoft','992351284':'Hessle','992351285':'Trent Falls',
-  '992351286':'North Shields','992351287':'Burton Stather',
-  '992351288':'Brough','992351289':'Whitton','992351312':'Immingham Dock',
-  '992501017':'Dún Laoghaire','992501018':'Dublin Port',
-  '992501295':'Dún Laoghaire','992501301':'Dublin Bay',
-  '995741977':'Hải Phòng','995741986':'Đình Vũ',
+  '992351272':'Grimsby','992351273':'Brough','992351274':'Spurn',
+  '992351275':'Sunk Dredged Channel','992351276':'Immingham',
+  '992351279':'South Ferriby','992351280':'Humber Bridge',
+  '992351281':'Humber Sea Terminal','992351282':'West Walker Dykes',
+  '992351283':'Blacktoft','992351284':'King George Dock',
+  '992351285':'Keadby','992351286':'North Shields',
+  '992351287':'Flixborough','992351288':'Goole Docks',
+  '992351289':'Burton Stather','992351312':'Stone Creek',
+  '992501017':'Kish Lighthouse','992501018':'South Burford',
+  '992501295':'Dún Laoghaire','992501301':'Dublin Bay Buoy',
+  '995741977':'Lạch Huyện Meteo','995741986':'Đình Vũ (ARRYO)',
 };
 function sname(s){return NAMES[String(s.mmsi)]||''}
+
+// Fetch live station names from AIS and merge (overrides static)
+async function refreshNames(){
+  try{
+    const live=await J('/station-names');
+    for(const[k,v]of Object.entries(live)){if(v)NAMES[k]=v}
+    renderList(); // re-render with updated names
+  }catch(e){}
+}
 
 // Country → ISO 3166-1 alpha-2 for flag-icons CSS
 const CC={
