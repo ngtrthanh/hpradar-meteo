@@ -24,29 +24,29 @@ Real-time maritime meteorological and hydrographic data collection from AIS (Aut
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Browser (SPA)                                   │
-│  MapLibre GL + Plotly + WebSocket client          │
-└──────────┬──────────────────────┬────────────────┘
-           │ HTTP /api/*          │ WS /api/ws/live
-┌──────────▼──────────────────────▼────────────────┐
-│  FastAPI (uvicorn)                                │
-│  ├── routes/api.py    REST + WebSocket            │
-│  ├── poller.py        per-source async loops      │
-│  ├── parser.py        AIS msg type 8 parser       │
-│  ├── ws.py            WebSocket broadcast hub     │
-│  └── db.py            asyncpg batch inserts       │
-└──────────┬───────────────────────────────────────┘
-           │
-┌──────────▼───────────────────────────────────────┐
-│  PostgreSQL / TimescaleDB                         │
-│  stations | meteo_obs | hydro_obs | alerts        │
-└──────────────────────────────────────────────────┘
-           ▲
-   AIS Sources (HTTP JSON)
-   ├── m3.hpradar.com   (60s)
-   ├── m4.hpradar.com   (60s)
-   └── aisinfra.hpradar.com (90s)
+┌──────────────────────────────────────────────────────────────┐
+│                        Browser (SPA)                         │
+│        MapLibre GL + Plotly + WebSocket client               │
+└───────────────┬───────────────────────────┬──────────────────┘
+                │ HTTP /api/*               │ WS /api/ws/live
+┌───────────────▼───────────────────────────▼──────────────────┐
+│                     FastAPI (uvicorn)                        │
+│  ├── routes/api.py    REST + WebSocket                       │
+│  ├── poller.py        per-source async loops                 │
+│  ├── parser.py        AIS msg type 8 parser                  │
+│  ├── ws.py            WebSocket broadcast hub                │
+│  └── db.py            asyncpg batch inserts                  │
+└───────────────┬──────────────────────────────────────────────┘
+                │
+┌───────────────▼──────────────────────────────────────────────┐
+│               PostgreSQL / TimescaleDB                       │
+│      stations | meteo_obs | hydro_obs | alerts               │
+└──────────────────────────────────────────────────────────────┘
+                ▲
+        AIS Sources (HTTP JSON)
+        ├── m3.hpradar.com   (60s)
+        ├── m4.hpradar.com   (60s)
+        └── aisinfra.hpradar.com (90s)
 ```
 
 ## Quick Start
