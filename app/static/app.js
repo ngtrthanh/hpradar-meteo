@@ -352,6 +352,7 @@ async function loadBot(){
   else if(bCur==='wind')await windRose(el);
   else if(bCur==='table')await tideTable(el);
   else if(bCur==='overlay')await dayOverlay(el);
+  else if(bCur==='predict')await predictPanel(el);
   else await sysPanel(el);
 }
 
@@ -492,6 +493,54 @@ async function dayOverlay(el){
       if(!traces.length){div.innerHTML='<div class="empty">Not enough data</div>';continue}
       Plotly.newPlot(div,traces,{...pLayout('m'),xaxis:{...pLayout('m').xaxis,title:{text:'Hour',font:{size:10}},range:[0,24],dtick:3},showlegend:true,legend:{font:{color:'#a0b4d0',size:9},bgcolor:'transparent'}},{responsive:true});
     }catch(e){div.innerHTML='<div class="empty">Error</div>'}
+  }
+}
+
+// ── TIDAL PREDICTION ──
+async function predictPanel(el){
+  const mmsi=sel||995741977; // default to Lạch Huyện
+  const s=STN.find(x=>x.mmsi===mmsi);
+  const nm=s?sname(s)||mmsi:mmsi;
+  el.innerHTML=`<div class="cgrid" style="grid-template-columns:1fr 300px">
+    <div class="cbox" style="height:auto;min-height:280px"><div class="ct" style="color:var(--neon)">🔮 ${nm} — Observed + Predicted</div><div class="cp" id="pred-chart"></div></div>
+    <div class="cbox" style="height:auto;min-height:280px"><div class="ct">Top Constituents</div><div id="pred-info" style="font-size:.78rem;color:var(--t2)">Loading analysis...</div></div>
+  </div>`;
+  await new Promise(r=>setTimeout(r,100));
+  try{
+    // Fetch observed + prediction in parallel
+    const[obs,pred]=await Promise.all([
+      J(`/hydro?mmsi=${mmsi}&limit=2000`),
+      J(`/tidal/predict/${mmsi}?hours=48`)
+    ]);
+    const obsS=obs.filter(r=>r.waterlevel!=null).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    const traces=[
+      {x:obsS.map(r=>r.ts),y:obsS.map(r=>r.waterlevel),mode:'lines',name:'Observed',line:{color:'#00ffaa',width:2}},
+      {x:pred.predictions.map(r=>r.ts),y:pred.predictions.map(r=>r.level),mode:'lines',name:'Predicted',line:{color:'#ff00aa',width:2,dash:'dot'}}
+    ];
+    // Add vertical line at prediction start
+    const predStart=pred.observed_end;
+    Plotly.newPlot('pred-chart',traces,{
+      ...pLayout('m'),showlegend:true,
+      legend:{font:{color:'#a0b4d0',size:10},bgcolor:'transparent'},
+      shapes:[{type:'line',x0:predStart,x1:predStart,y0:0,y1:1,yref:'paper',line:{color:'#ffcc00',width:1,dash:'dash'}}],
+      annotations:[{x:predStart,y:1,yref:'paper',text:'Now →',showarrow:false,font:{color:'#ffcc00',size:10},xanchor:'left'}]
+    },{responsive:true});
+    // Info panel
+    let info=`<div style="margin-bottom:12px">
+      <div style="color:var(--neon);font-weight:700;font-size:1rem">R² = ${pred.r2.toFixed(4)}</div>
+      <div>RMSE = ${pred.rmse.toFixed(4)} m</div>
+      <div>${pred.n_constituents} constituents</div>
+      <div>Predicting ${48}h ahead</div>
+    </div>`;
+    info+='<table class="rt"><thead><tr><th>Name</th><th>Amp (m)</th><th>Phase °</th><th>°/hr</th></tr></thead><tbody>';
+    pred.top_constituents.forEach(([name,c])=>{
+      info+=`<tr><td style="font-weight:700">${name}</td><td class="hi">${c.amp.toFixed(4)}</td><td>${c.phase.toFixed(1)}</td><td>${c.freq.toFixed(4)}</td></tr>`;
+    });
+    info+='</tbody></table>';
+    $('pred-info').innerHTML=info;
+  }catch(e){
+    $('pred-chart').innerHTML=`<div class="empty">Error: ${e.message}</div>`;
+    $('pred-info').innerHTML='<div class="empty">Analysis failed</div>';
   }
 }
 
