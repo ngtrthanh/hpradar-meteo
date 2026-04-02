@@ -241,7 +241,10 @@ async def tidal_analyze(mmsi: int, limit: int = Query(5000)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 AND waterlevel IS NOT NULL "
-            "ORDER BY ts ASC LIMIT $2", mmsi, _clamp_limit(limit))
+            "ORDER BY ts DESC LIMIT $2", mmsi, _clamp_limit(limit))
+    if len(rows) < 48:
+        raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
+    rows = list(reversed(rows))
     if len(rows) < 48:
         raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
 
@@ -265,9 +268,10 @@ async def tidal_predict(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 AND waterlevel IS NOT NULL "
-            "ORDER BY ts ASC LIMIT 5000", mmsi)
+            "ORDER BY ts DESC LIMIT 5000", mmsi)
     if len(rows) < 48:
         raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
+    rows = list(reversed(rows))  # oldest first for analysis
 
     from tidal import analyze, predict
     times = [r["ts"] for r in rows]
