@@ -68,9 +68,12 @@ async def get_counts(exact: bool = Query(False)):
 async def get_stations(limit: int = Query(1000)):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT mmsi, dac, fi, lon, lat, country FROM stations ORDER BY mmsi LIMIT $1",
-            _clamp_limit(limit))
+        rows = await conn.fetch("""
+            SELECT s.mmsi, s.dac, s.fi, s.lon, s.lat, s.country,
+                   (SELECT COUNT(*) > 0 FROM meteo_obs m WHERE m.mmsi = s.mmsi) AS has_meteo,
+                   (SELECT COUNT(*) > 0 FROM hydro_obs h WHERE h.mmsi = s.mmsi) AS has_hydro
+            FROM stations s ORDER BY s.mmsi LIMIT $1
+        """, _clamp_limit(limit))
         return [dict(r) for r in rows]
 
 

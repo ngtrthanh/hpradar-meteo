@@ -93,6 +93,18 @@ async function loadStations(){
 
 function filterList(){searchQ=$('search').value.toLowerCase();renderList()}
 
+// Country → flag emoji via ISO 3166
+const FLAGS={
+  'Vietnam':'🇻🇳','United Kingdom':'🇬🇧','Finland':'🇫🇮','Sweden':'🇸🇪',
+  'Ireland':'🇮🇪','Canada':'🇨🇦','Spain':'🇪🇸','Estonia':'🇪🇪',
+  'Norway':'🇳🇴','Denmark':'🇩🇰','Germany':'🇩🇪','France':'🇫🇷',
+  'Netherlands':'🇳🇱','Belgium':'🇧🇪','Portugal':'🇵🇹','Italy':'🇮🇹',
+  'Greece':'🇬🇷','Poland':'🇵🇱','Latvia':'🇱🇻','Lithuania':'🇱🇹',
+  'Russia':'🇷🇺','China':'🇨🇳','Japan':'🇯🇵','South Korea':'🇰🇷',
+  'Australia':'🇦🇺','New Zealand':'🇳🇿','USA':'🇺🇸','Brazil':'🇧🇷',
+};
+function flag(c){return FLAGS[c]||'🏳️'}
+
 function renderList(){
   const f=STN.filter(s=>{
     if(!searchQ)return true;
@@ -100,9 +112,11 @@ function renderList(){
   });
   $('slist').innerHTML=f.length?f.map((s,i)=>{
     const ci=STN.indexOf(s);
+    const icons=(s.has_hydro?'<span title="Water level" style="color:var(--cyan)">🌊</span>':'')+
+                (s.has_meteo?'<span title="Wind data" style="color:var(--neon)">💨</span>':'');
     return `<div class="si${s.mmsi===sel?' on':''}" onclick="pick(${s.mmsi})">
-      <div class="nm"><span style="color:${C[ci%C.length]}">${s.mmsi}</span><span class="fl">${s.country||'?'}</span></div>
-      <div class="sub">${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}</div>
+      <div class="nm"><span style="color:${C[ci%C.length]}">${flag(s.country)} ${s.mmsi}</span><span class="fl">${icons||'—'}</span></div>
+      <div class="sub">${s.country||'Unknown'} · ${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}</div>
     </div>`;
   }).join(''):'<div class="empty">No match</div>';
 }
