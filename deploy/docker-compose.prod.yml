@@ -1,0 +1,38 @@
+services:
+  hydro-api:
+    image: ghcr.io/ngtrthanh/hpradar-meteo:latest
+    container_name: hydro-api
+    restart: unless-stopped
+    ports:
+      - "8111:8000"
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
+    depends_on:
+      hydro-api:
+        condition: service_healthy
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300 --cleanup hydro-api
+    # Checks GHCR every 5 min, only updates hydro-api, prunes old images
