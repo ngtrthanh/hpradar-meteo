@@ -256,11 +256,11 @@ async def tidal_analyze(mmsi: int, limit: int = Query(5000)):
 @router.get("/tidal/predict/{mmsi}")
 async def tidal_predict(
     mmsi: int,
-    hours: int = Query(48, description="Hours to predict ahead"),
+    hours_ahead: int = Query(48, description="Hours to predict into future"),
+    hours_back: int = Query(72, description="Hours to hindcast into past"),
 ):
-    """Predict tide levels using harmonic analysis."""
+    """Predict tide: hindcast over observed period + forecast ahead."""
     _validate_mmsi(mmsi)
-    # First analyze
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -274,19 +274,24 @@ async def tidal_predict(
     values = [float(r["waterlevel"]) for r in rows]
     analysis = analyze(times, values)
 
-    # Predict from last observation to +hours
-    start = times[-1]
-    end = start + timedelta(hours=hours)
-    predictions = predict(analysis, start, end, interval_min=10)
+    last_obs = times[-1]
+    # Hindcast: from (last_obs - hours_back) to last_obs
+    hind_start = last_obs - timedelta(hours=hours_back)
+    # Forecast: from last_obs to (last_obs + hours_ahead)
+    fore_end = last_obs + timedelta(hours=hours_ahead)
+
+    # Single continuous prediction from hind_start to fore_end
+    all_pred = predict(analysis, hind_start, fore_end, interval_min=10)
 
     return {
         "mmsi": mmsi,
         "r2": analysis["r2"],
         "rmse": analysis["rmse"],
         "n_constituents": analysis["n_constituents"],
-        "observed_end": start.isoformat(),
-        "predict_end": end.isoformat(),
-        "predictions": predictions,
+        "observed_start": hind_start.isoformat(),
+        "observed_end": last_obs.isoformat(),
+        "predict_end": fore_end.isoformat(),
+        "predictions": all_pred,
         "top_constituents": sorted(
             analysis["constituents"].items(),
             key=lambda x: x[1]["amp"], reverse=True
