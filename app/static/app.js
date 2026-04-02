@@ -79,10 +79,15 @@ function syncMK(){
 }
 
 function showPop(s){
+  const nm=sname(s);
+  const recs=(s.meteo_count||0)+(s.hydro_count||0);
+  const icons=(s.has_hydro?'🌊':'')+' '+(s.has_meteo?'💨':'');
   popup.setLngLat([s.lon,s.lat]).setHTML(
-    `<div class="pt">${s.mmsi}</div>`+
+    `<div class="pt">${flag(s.country)} ${nm||s.mmsi}</div>`+
+    (nm?`<div class="pr"><span class="l">MMSI</span>${s.mmsi}</div>`:'')+
     `<div class="pr"><span class="l">Pos</span>${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}</div>`+
-    `<div class="pr"><span class="l">Country</span>${s.country||'—'}</div>`
+    `<div class="pr"><span class="l">Data</span>${icons}</div>`+
+    `<div class="pr"><span class="l">Records</span>${recs.toLocaleString()}</div>`
   ).addTo(map);
 }
 
@@ -92,6 +97,23 @@ async function loadStations(){
 }
 
 function filterList(){searchQ=$('search').value.toLowerCase();renderList()}
+
+// Station names (reverse geocoded from coordinates)
+const NAMES={
+  '2242115':'A Coruña','2300057':'Helsinki','2300059':'Rauma',
+  '2655619':'Stockholm','2766100':'Pärnu','2766140':'Pärnu',
+  '3160011':'Juan de Fuca','3160029':'Kingston',
+  '992351272':'Grimsby','992351273':'Goole','992351274':'Spurn Head',
+  '992351275':'Immingham','992351276':'New Holland','992351279':'Flixborough',
+  '992351280':'Humber Bridge','992351281':'Hull','992351282':'Keadby',
+  '992351283':'Blacktoft','992351284':'Hessle','992351285':'Trent Falls',
+  '992351286':'North Shields','992351287':'Burton Stather',
+  '992351288':'Brough','992351289':'Whitton','992351312':'Immingham Dock',
+  '992501017':'Dún Laoghaire','992501018':'Dublin Port',
+  '992501295':'Dún Laoghaire','992501301':'Dublin Bay',
+  '995741977':'Hải Phòng','995741986':'Đình Vũ',
+};
+function sname(s){return NAMES[String(s.mmsi)]||''}
 
 // Country → ISO 3166-1 alpha-2 for flag-icons CSS
 const CC={
@@ -110,15 +132,17 @@ function flag(c){const code=CC[c];return code?`<span class="fi fi-${code}" style
 function renderList(){
   const f=STN.filter(s=>{
     if(!searchQ)return true;
-    return String(s.mmsi).includes(searchQ)||(s.country||'').toLowerCase().includes(searchQ);
+    return String(s.mmsi).includes(searchQ)||(s.country||'').toLowerCase().includes(searchQ)||sname(s).toLowerCase().includes(searchQ);
   });
   $('slist').innerHTML=f.length?f.map((s,i)=>{
     const ci=STN.indexOf(s);
     const icons=(s.has_hydro?'<span title="Water level" style="color:var(--cyan)">🌊</span>':'')+
                 (s.has_meteo?'<span title="Wind data" style="color:var(--neon)">💨</span>':'');
+    const nm=sname(s);
+    const recs=(s.meteo_count||0)+(s.hydro_count||0);
     return `<div class="si${s.mmsi===sel?' on':''}" onclick="pick(${s.mmsi})">
-      <div class="nm"><span style="color:${C[ci%C.length]}">${flag(s.country)} ${s.mmsi}</span><span class="fl">${icons||'—'}</span></div>
-      <div class="sub">${s.country||'Unknown'} · ${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}</div>
+      <div class="nm">${flag(s.country)} <span style="color:${C[ci%C.length]}">${nm||s.mmsi}</span><span class="fl">${icons||'—'}</span></div>
+      <div class="sub">${nm?s.mmsi+' · ':''}${s.country||'?'} · ${recs.toLocaleString()} rec</div>
     </div>`;
   }).join(''):'<div class="empty">No match</div>';
 }
@@ -267,7 +291,7 @@ async function tidePlots(el){
   if(!list.length){el.innerHTML='<div class="empty">No stations</div>';return}
   const cols=Math.min(list.length,3);
   el.innerHTML=`<div class="cgrid" style="grid-template-columns:repeat(${cols},1fr)">${
-    list.map((s,i)=>`<div class="cbox"><div class="ct" style="color:${C[STN.indexOf(s)%C.length]}">${s.mmsi} — ${s.country||'?'}</div><div class="cp" id="tc${i}"></div></div>`).join('')
+    list.map((s,i)=>`<div class="cbox"><div class="ct" style="color:${C[STN.indexOf(s)%C.length]}">${sname(s)||s.mmsi} — ${s.country||'?'}</div><div class="cp" id="tc${i}"></div></div>`).join('')
   }</div>`;
   // small delay so DOM has layout dimensions
   await new Promise(r=>setTimeout(r,100));
@@ -292,7 +316,7 @@ async function windRose(el){
   if(!list.length){el.innerHTML='<div class="empty">No stations</div>';return}
   const cols=Math.min(list.length,3);
   el.innerHTML=`<div class="cgrid" style="grid-template-columns:repeat(${cols},1fr)">${
-    list.map((s,i)=>`<div class="cbox"><div class="ct" style="color:${C[STN.indexOf(s)%C.length]}">${s.mmsi} — ${s.country||'?'}</div><div class="cp" id="wr${i}"></div></div>`).join('')
+    list.map((s,i)=>`<div class="cbox"><div class="ct" style="color:${C[STN.indexOf(s)%C.length]}">${sname(s)||s.mmsi} — ${s.country||'?'}</div><div class="cp" id="wr${i}"></div></div>`).join('')
   }</div>`;
   await new Promise(r=>setTimeout(r,100));
   const dirs=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];

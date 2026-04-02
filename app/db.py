@@ -67,6 +67,7 @@ async def _ensure_schema(pool: asyncpg.Pool):
 
         # Optional migrations — may fail on permission-restricted DBs
         _optional = [
+            "ALTER TABLE stations ADD COLUMN IF NOT EXISTS name TEXT",
             "ALTER TABLE meteo_obs ADD COLUMN IF NOT EXISTS quality SMALLINT DEFAULT 0",
             "ALTER TABLE hydro_obs ADD COLUMN IF NOT EXISTS quality SMALLINT DEFAULT 0",
             "CREATE INDEX IF NOT EXISTS idx_meteo_ts ON meteo_obs (ts DESC)",

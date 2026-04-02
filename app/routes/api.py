@@ -68,13 +68,21 @@ async def get_counts(exact: bool = Query(False)):
 async def get_stations(limit: int = Query(1000)):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT s.mmsi, s.dac, s.fi, s.lon, s.lat, s.country,
-                   (SELECT COUNT(*) > 0 FROM meteo_obs m WHERE m.mmsi = s.mmsi) AS has_meteo,
-                   (SELECT COUNT(*) > 0 FROM hydro_obs h WHERE h.mmsi = s.mmsi) AS has_hydro
+        # Check if name column exists
+        has_name = await conn.fetchval(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns "
+            "WHERE table_name='stations' AND column_name='name'")
+        name_col = "s.name," if has_name else "NULL AS name,"
+        rows = await conn.fetch(f"""
+            SELECT s.mmsi, s.dac, s.fi, s.lon, s.lat, s.country, {name_col}
+                   (SELECT COUNT(*) FROM meteo_obs m WHERE m.mmsi = s.mmsi) AS meteo_count,
+                   (SELECT COUNT(*) FROM hydro_obs h WHERE h.mmsi = s.mmsi) AS hydro_count
             FROM stations s ORDER BY s.mmsi LIMIT $1
         """, _clamp_limit(limit))
-        return [dict(r) for r in rows]
+        return [{**dict(r),
+                 "has_meteo": r["meteo_count"] > 0,
+                 "has_hydro": r["hydro_count"] > 0}
+                for r in rows]
 
 
 @router.get("/stations/{mmsi}")
