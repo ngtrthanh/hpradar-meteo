@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api")
 
 # Simple in-memory cache (Phase 2 item 8)
 _cache: dict[str, tuple[float, object]] = {}
-CACHE_TTL = 180  # seconds, matches poll interval
+CACHE_TTL = 30  # seconds
 
 
 def _cached(key: str):
@@ -39,26 +39,16 @@ def _validate_mmsi(mmsi: Optional[int]):
 
 
 @router.get("/counts")
-async def get_counts(exact: bool = Query(False)):
-    """Record counts. Use ?exact=true for precise counts (Phase 2 item 9)."""
+async def get_counts():
+    """Record counts — cached 30s."""
     cached = _cached("counts")
-    if cached and not exact:
+    if cached:
         return cached
-
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        if exact:
-            s = await conn.fetchval("SELECT COUNT(*) FROM stations")
-            m = await conn.fetchval("SELECT COUNT(*) FROM meteo_obs")
-            h = await conn.fetchval("SELECT COUNT(*) FROM hydro_obs")
-        else:
-            s = await conn.fetchval(
-                "SELECT reltuples::bigint FROM pg_class WHERE relname='stations'")
-            m = await conn.fetchval(
-                "SELECT reltuples::bigint FROM pg_class WHERE relname='meteo_obs'")
-            h = await conn.fetchval(
-                "SELECT reltuples::bigint FROM pg_class WHERE relname='hydro_obs'")
-
+        s = await conn.fetchval("SELECT COUNT(*) FROM stations")
+        m = await conn.fetchval("SELECT COUNT(*) FROM meteo_obs")
+        h = await conn.fetchval("SELECT COUNT(*) FROM hydro_obs")
     result = {"stations": s or 0, "meteo_observations": m or 0, "hydro_observations": h or 0}
     _set_cache("counts", result)
     return result

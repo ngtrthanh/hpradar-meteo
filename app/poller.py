@@ -102,6 +102,10 @@ async def _fetch_source(client: httpx.AsyncClient, url: str):
     if flagged:
         await db.batch_upsert_flagged(flagged)
         await ws.broadcast([p for p, q in flagged if q == 0])
+        # Invalidate counts cache
+        from routes.api import _cache
+        _cache.pop("counts", None)
+        _cache.pop("stations", None)
 
     logger.info("Source %s: %d msgs, %d stored (%d spikes), stats=%s",
                 url, len(arr), len(flagged), spikes, dict(stats))
