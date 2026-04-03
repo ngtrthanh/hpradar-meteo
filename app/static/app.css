@@ -105,11 +105,15 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .cc-close{background:none;border:none;color:var(--t3);cursor:pointer;font-size:.9rem;padding:2px 6px}
 .cc-close:hover{color:var(--red)}
 
-/* STALE / ALERTS */
+/* STALE / HEARTBEAT */
 .sdot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px}
-.sdot.fresh{background:var(--neon);box-shadow:0 0 6px rgba(0,255,170,.4)}
-.sdot.stale{background:var(--yellow);box-shadow:0 0 6px rgba(255,187,0,.4)}
-.sdot.dead{background:var(--red);box-shadow:0 0 6px rgba(255,51,85,.4)}
+.sdot.fresh{background:var(--neon);box-shadow:0 0 6px rgba(0,255,170,.4);animation:pulse 2s ease-in-out infinite}
+.sdot.stale{background:var(--yellow);box-shadow:0 0 4px rgba(255,187,0,.3);animation:pulse 4s ease-in-out infinite}
+.sdot.dead{background:var(--red);opacity:.4}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.7)}}
+@keyframes mk-pulse{0%,100%{opacity:1;box-shadow:0 0 10px currentColor}50%{opacity:.5;box-shadow:0 0 4px currentColor}}
+.si.faint{opacity:.4}
+.si.faint:hover{opacity:.7}
 .aform{padding:12px;display:flex;flex-direction:column;gap:8px}
 .aform select,.aform input{background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:6px 10px;border-radius:6px;font-size:.78rem}
 .aform select:focus,.aform input:focus{border-color:var(--neon);outline:none}

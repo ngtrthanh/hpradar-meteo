@@ -64,12 +64,15 @@ function syncMK(){
     if(!s.lat||!s.lon)return;
     if(MK[s.mmsi]){MK[s.mmsi].setLngLat([s.lon,s.lat]);return}
     const c=C[i%C.length];
+    const fresh=freshness(s);
     // Outer wrapper: fixed size, centers the dot inside
     const wrap=document.createElement('div');
     wrap.style.cssText='width:24px;height:24px;display:flex;align-items:center;justify-content:center;cursor:pointer';
-    // Inner dot
+    // Inner dot with heartbeat based on freshness
     const dot=document.createElement('div');
-    dot.style.cssText=`width:12px;height:12px;border-radius:50%;background:${c};border:2px solid #080c14;box-shadow:0 0 10px ${c}80;transition:width .15s,height .15s,box-shadow .15s`;
+    const opacity=fresh==='dead'?'0.3':fresh==='stale'?'0.6':'1';
+    const anim=fresh==='fresh'?'animation:mk-pulse 2s ease-in-out infinite;':fresh==='stale'?'animation:mk-pulse 4s ease-in-out infinite;':'';
+    dot.style.cssText=`width:12px;height:12px;border-radius:50%;background:${c};border:2px solid #080c14;box-shadow:0 0 10px ${c}80;opacity:${opacity};transition:width .15s,height .15s;${anim}`;
     wrap.appendChild(dot);
     wrap.onmouseenter=()=>{dot.style.width='18px';dot.style.height='18px';dot.style.boxShadow=`0 0 18px ${c}`;showPop(s)};
     wrap.onmouseleave=()=>{dot.style.width='12px';dot.style.height='12px';dot.style.boxShadow=`0 0 10px ${c}80`;popup.remove()};
@@ -153,7 +156,8 @@ function renderList(){
     const nm=sname(s);
     const recs=(s.meteo_count||0)+(s.hydro_count||0);
     const fresh=freshness(s);
-    return `<div class="si${s.mmsi===sel?' on':''}" onclick="pick(${s.mmsi})">
+    const faint=fresh==='dead'?' faint':'';
+    return `<div class="si${s.mmsi===sel?' on':''}${faint}" onclick="pick(${s.mmsi})">
       <div class="nm"><span class="sdot ${fresh}"></span>${flag(s.country)} <span style="color:${C[ci%C.length]}">${nm||s.mmsi}</span><span class="fl">${icons||'—'}</span></div>
       <div class="sub">${nm?s.mmsi+' · ':''}${s.country||'?'} · ${recs.toLocaleString()} rec</div>
     </div>`;
