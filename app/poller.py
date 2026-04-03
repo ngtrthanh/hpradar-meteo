@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from collections import Counter
+from collections import Counter, defaultdict
 
 import httpx
 
@@ -12,6 +12,9 @@ from parser import parse_message
 logger = logging.getLogger(__name__)
 
 _tasks: list[asyncio.Task] = []
+# Rolling last-known waterlevel per MMSI for spike detection
+_last_wl: dict[int, float] = {}
+SPIKE_THRESHOLD = 1.0  # metres — max plausible change between consecutive readings
 
 
 async def start():
@@ -78,10 +81,25 @@ async def _fetch_source(client: httpx.AsyncClient, url: str):
             seen.add(key)
             unique.append(p)
 
-    if unique:
-        await db.batch_upsert(unique)
-        # Push to WebSocket clients
-        await ws.broadcast(unique)
+    # Spike filter: reject waterlevel readings that jump >1m from last known value
+    clean = []
+    spikes = 0
+    for p in unique:
+        if p.waterlevel is not None and p.mmsi in _last_wl:
+            if abs(p.waterlevel - _last_wl[p.mmsi]) > SPIKE_THRESHOLD:
+                spikes += 1
+                p = p.model_copy(update={"waterlevel": None})  # strip bad waterlevel, keep meteo
+        if p.waterlevel is not None:
+            _last_wl[p.mmsi] = p.waterlevel
+        # Keep point if it still has any useful data
+        if p.wspeed is not None or p.wdir is not None or p.waterlevel is not None:
+            clean.append(p)
+    if spikes:
+        stats["spikes_filtered"] = spikes
 
-    logger.info("Source %s: %d msgs, %d unique, stats=%s",
-                url, len(arr), len(unique), dict(stats))
+    if clean:
+        await db.batch_upsert(clean)
+        await ws.broadcast(clean)
+
+    logger.info("Source %s: %d msgs, %d clean, stats=%s",
+                url, len(arr), len(clean), dict(stats))
