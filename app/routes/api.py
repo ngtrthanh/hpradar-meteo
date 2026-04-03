@@ -160,17 +160,26 @@ async def get_hydro(
     limit: int = Query(500),
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
+    raw: bool = Query(False, description="Include flagged/spike data"),
 ):
     _validate_mmsi(mmsi)
     pool = await db.get_pool()
     lim = _clamp_limit(limit)
     clauses, params = _build_filters(mmsi, start, end)
-    q = f"SELECT mmsi, ts, waterlevel, seastate FROM hydro_obs {clauses} ORDER BY ts DESC LIMIT {lim}"
+    if not raw:
+        clauses += (" AND " if "WHERE" in clauses else " WHERE ") + "(quality IS NULL OR quality = 0)"
+    q = f"SELECT mmsi, ts, waterlevel, seastate, quality FROM hydro_obs {clauses} ORDER BY ts DESC LIMIT {lim}"
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch(q, *params)
+        try:
+            rows = await conn.fetch(q, *params)
+        except Exception:
+            # quality column may not exist
+            q2 = f"SELECT mmsi, ts, waterlevel, seastate FROM hydro_obs {_build_filters(mmsi, start, end)[0]} ORDER BY ts DESC LIMIT {lim}"
+            rows = await conn.fetch(q2, *_build_filters(mmsi, start, end)[1])
     return [{"mmsi": r["mmsi"], "ts": r["ts"].isoformat(),
-             "waterlevel": r["waterlevel"], "seastate": r["seastate"]}
+             "waterlevel": r["waterlevel"], "seastate": r["seastate"],
+             "quality": r.get("quality")}
             for r in rows]
 
 

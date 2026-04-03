@@ -107,11 +107,18 @@ async def _ensure_schema(pool: asyncpg.Pool):
 
 
 async def batch_upsert(points):
-    """Batch insert using executemany — Phase 2 item 5."""
-    if not points:
-        return
-    from quality import check_quality
+    """Legacy wrapper — flags all as quality=0."""
+    await batch_upsert_flagged([(p, 0) for p in points])
 
+
+async def batch_upsert_flagged(flagged):
+    """Store all raw data with quality flag. Never discard.
+    flagged: list of (MeteoHydroPoint, quality_flag)
+    quality: 0=good, 1=suspect, 2=spike
+    """
+    if not flagged:
+        return
+    points = [p for p, _ in flagged]
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -124,9 +131,9 @@ async def batch_upsert(points):
                       lat=EXCLUDED.lat, country=EXCLUDED.country
             """, [(p.mmsi, p.dac, p.fi, p.lon, p.lat, p.country) for p in points])
 
-            # Meteo: only if we have actual wind data
+            # Meteo: store all with wind data
             meteo = [(p.mmsi, p.ts, p.wspeed, p.wdir)
-                     for p in points if p.wspeed is not None or p.wdir is not None]
+                     for p, q in flagged if p.wspeed is not None or p.wdir is not None]
             if meteo:
                 await conn.executemany("""
                     INSERT INTO meteo_obs (mmsi, ts, wspeed, wdir)
@@ -134,22 +141,31 @@ async def batch_upsert(points):
                     ON CONFLICT (mmsi, ts) DO NOTHING
                 """, meteo)
 
-            # Hydro: only if we have actual waterlevel
-            hydro = [(p.mmsi, p.ts, p.waterlevel, p.seastate)
-                     for p in points if p.waterlevel is not None]
-            if hydro:
-                await conn.executemany("""
-                    INSERT INTO hydro_obs (mmsi, ts, waterlevel, seastate)
-                    VALUES ($1,$2,$3,$4)
-                    ON CONFLICT (mmsi, ts) DO NOTHING
-                """, hydro)
+            # Hydro: store ALL raw data with quality flag if column exists
+            hydro_data = [(p.mmsi, p.ts, p.waterlevel, p.seastate, q)
+                          for p, q in flagged if p.waterlevel is not None]
+            if hydro_data:
+                try:
+                    sp = await conn.execute("SAVEPOINT hydro_sp")
+                    await conn.executemany("""
+                        INSERT INTO hydro_obs (mmsi, ts, waterlevel, seastate, quality)
+                        VALUES ($1,$2,$3,$4,$5)
+                        ON CONFLICT (mmsi, ts) DO UPDATE SET quality = EXCLUDED.quality
+                    """, hydro_data)
+                except Exception:
+                    await conn.execute("ROLLBACK TO SAVEPOINT hydro_sp")
+                    await conn.executemany("""
+                        INSERT INTO hydro_obs (mmsi, ts, waterlevel, seastate)
+                        VALUES ($1,$2,$3,$4)
+                        ON CONFLICT (mmsi, ts) DO NOTHING
+                    """, [(h[0], h[1], h[2], h[3]) for h in hydro_data])
 
-    logger.info("Batch insert: %d stations, %d meteo, %d hydro",
-                len(points), len(meteo) if meteo else 0,
-                len(hydro) if hydro else 0)
+    good = sum(1 for _, q in flagged if q == 0)
+    bad = sum(1 for _, q in flagged if q > 0)
+    logger.info("Batch insert: %d points (%d good, %d flagged)", len(flagged), good, bad)
 
-    # Check alerts (Phase 6 item 28)
-    await _check_alerts(points)
+    # Check alerts only on good data
+    await _check_alerts([p for p, q in flagged if q == 0])
 
 
 async def _check_alerts(points):

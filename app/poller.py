@@ -14,12 +14,11 @@ logger = logging.getLogger(__name__)
 _tasks: list[asyncio.Task] = []
 # Rolling last-known waterlevel per MMSI for spike detection: {mmsi: (waterlevel, timestamp)}
 _last_wl: dict[int, tuple[float, object]] = {}
-SPIKE_THRESHOLD = 1.0  # metres — max plausible change between consecutive readings
-MAX_RATE = 6.0  # metres/hour — max plausible rate of change (Humber spring tide ~4m/hr)
+SPIKE_THRESHOLD = 1.0  # metres
+MAX_RATE = 6.0  # metres/hour
 
 
 async def start():
-    """Start one poller task per source (each with its own interval)."""
     global _tasks
     for src in config.SOURCES:
         t = asyncio.create_task(_source_loop(src["url"], src["interval"]))
@@ -39,7 +38,6 @@ def is_running() -> bool:
 
 
 async def fetch_once():
-    """Manual one-shot fetch from all sources."""
     async with httpx.AsyncClient() as client:
         for src in config.SOURCES:
             await _fetch_source(client, src["url"])
@@ -82,30 +80,28 @@ async def _fetch_source(client: httpx.AsyncClient, url: str):
             seen.add(key)
             unique.append(p)
 
-    # Spike filter: reject waterlevel readings that jump too fast
-    # Two checks: absolute jump >1m AND rate >6m/hr from last known value
-    clean = []
+    # Quality flag: 0=good, 1=suspect, 2=spike (store all, flag bad)
+    flagged = []
     spikes = 0
     for p in unique:
+        qf = 0
         if p.waterlevel is not None and p.mmsi in _last_wl:
             prev_wl, prev_ts = _last_wl[p.mmsi]
             delta = abs(p.waterlevel - prev_wl)
             gap_hr = max((p.ts - prev_ts).total_seconds() / 3600, 0.001)
             rate = delta / gap_hr
             if delta > SPIKE_THRESHOLD and rate > MAX_RATE:
+                qf = 2
                 spikes += 1
-                p = p.model_copy(update={"waterlevel": None})
-        if p.waterlevel is not None:
+        if p.waterlevel is not None and qf == 0:
             _last_wl[p.mmsi] = (p.waterlevel, p.ts)
-        # Keep point if it still has any useful data
-        if p.wspeed is not None or p.wdir is not None or p.waterlevel is not None:
-            clean.append(p)
+        flagged.append((p, qf))
     if spikes:
-        stats["spikes_filtered"] = spikes
+        stats["spikes"] = spikes
 
-    if clean:
-        await db.batch_upsert(clean)
-        await ws.broadcast(clean)
+    if flagged:
+        await db.batch_upsert_flagged(flagged)
+        await ws.broadcast([p for p, q in flagged if q == 0])
 
-    logger.info("Source %s: %d msgs, %d clean, stats=%s",
-                url, len(arr), len(clean), dict(stats))
+    logger.info("Source %s: %d msgs, %d stored (%d spikes), stats=%s",
+                url, len(arr), len(flagged), spikes, dict(stats))
