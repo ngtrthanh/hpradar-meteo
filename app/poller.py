@@ -12,9 +12,10 @@ from parser import parse_message
 logger = logging.getLogger(__name__)
 
 _tasks: list[asyncio.Task] = []
-# Rolling last-known waterlevel per MMSI for spike detection
-_last_wl: dict[int, float] = {}
+# Rolling last-known waterlevel per MMSI for spike detection: {mmsi: (waterlevel, timestamp)}
+_last_wl: dict[int, tuple[float, object]] = {}
 SPIKE_THRESHOLD = 1.0  # metres — max plausible change between consecutive readings
+MAX_RATE = 6.0  # metres/hour — max plausible rate of change (Humber spring tide ~4m/hr)
 
 
 async def start():
@@ -81,16 +82,21 @@ async def _fetch_source(client: httpx.AsyncClient, url: str):
             seen.add(key)
             unique.append(p)
 
-    # Spike filter: reject waterlevel readings that jump >1m from last known value
+    # Spike filter: reject waterlevel readings that jump too fast
+    # Two checks: absolute jump >1m AND rate >6m/hr from last known value
     clean = []
     spikes = 0
     for p in unique:
         if p.waterlevel is not None and p.mmsi in _last_wl:
-            if abs(p.waterlevel - _last_wl[p.mmsi]) > SPIKE_THRESHOLD:
+            prev_wl, prev_ts = _last_wl[p.mmsi]
+            delta = abs(p.waterlevel - prev_wl)
+            gap_hr = max((p.ts - prev_ts).total_seconds() / 3600, 0.001)
+            rate = delta / gap_hr
+            if delta > SPIKE_THRESHOLD and rate > MAX_RATE:
                 spikes += 1
-                p = p.model_copy(update={"waterlevel": None})  # strip bad waterlevel, keep meteo
+                p = p.model_copy(update={"waterlevel": None})
         if p.waterlevel is not None:
-            _last_wl[p.mmsi] = p.waterlevel
+            _last_wl[p.mmsi] = (p.waterlevel, p.ts)
         # Keep point if it still has any useful data
         if p.wspeed is not None or p.wdir is not None or p.waterlevel is not None:
             clean.append(p)
