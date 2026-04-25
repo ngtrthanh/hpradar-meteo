@@ -301,7 +301,7 @@ async function loadRight() {
       lastRightData = d;
       $('einfo').textContent = d.length + ' rows';
       el.innerHTML = d.length ? `<table class="rt"><thead><tr><th>MMSI</th><th>Level</th><th>Sea</th><th>When</th></tr></thead><tbody>${d.map(r => `<tr><td>${r.mmsi}</td><td class="hi">${r.waterlevel ?? '—'}</td><td>${r.seastate ?? '—'}</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No hydro data</div>';
-    } else {
+    } else if (rCur === 'alerts') {
       $('einfo').textContent = '';
       try {
         const d = await J('/alerts'); const ev = d.recent_events || []; const al = d.alerts || [];
