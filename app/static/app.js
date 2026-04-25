@@ -602,7 +602,10 @@ async function predictPanel(el) {
       <div style="color:${pred.r2 > 0.8 ? 'var(--neon)' : pred.r2 > 0.5 ? 'var(--yellow)' : 'var(--red)'};font-weight:700">R² = ${pred.r2.toFixed(4)}</div>
       ${!goodFit ? '<div style="color:var(--yellow);font-size:.72rem;margin:4px 0">⚠ Low model fit — prediction unreliable. Needs more data or stronger tidal signal.</div>' : ''}
       <div>RMSE = ${(pred.rmse * 100).toFixed(1)} cm</div>
+      ${pred.recent_rmse != null ? `<div>Recent RMSE = ${(pred.recent_rmse * 100).toFixed(1)} cm</div>` : ''}
+      ${pred.bias != null ? `<div>Bias correction = ${(pred.bias * 100).toFixed(1)} cm</div>` : ''}
       <div>${pred.n_constituents} constituents</div>
+      ${pred.fitted_ago_min != null ? `<div style="color:var(--t3);font-size:.7rem">Model fitted ${pred.fitted_ago_min}min ago</div>` : ''}
     </div>`;
     info += '<table class="rt" style="margin-top:8px"><thead><tr><th>Name</th><th>Amp</th><th>Phase</th></tr></thead><tbody>';
     pred.top_constituents.forEach(([name, c]) => {

@@ -250,67 +250,13 @@ async def tidal_predict(
     hours_ahead: int = Query(48, description="Hours to predict into future"),
     hours_back: int = Query(72, description="Hours to hindcast into past"),
 ):
-    """Predict tide: hindcast over observed period + forecast ahead."""
+    """Self-improving tide prediction with auto-refit and bias correction."""
     _validate_mmsi(mmsi)
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        # Fetch all available data, subsampled to ~hourly for wide span
-        rows = await conn.fetch(
-            "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 AND waterlevel IS NOT NULL "
-            "ORDER BY ts ASC", mmsi)
-    if len(rows) < 48:
-        raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
-
-    # Subsample to ~10min intervals if too dense (keeps matrix <20K rows)
-    if len(rows) > 20000:
-        step = max(1, len(rows) // 20000)
-        rows = rows[::step]
-
-    from tidal import analyze, predict
-    times = [r["ts"] for r in rows]
-    values = [float(r["waterlevel"]) for r in rows]
-    analysis = analyze(times, values)
-
-    last_obs = times[-1]
-    # Hindcast: from (last_obs - hours_back) to last_obs
-    hind_start = last_obs - timedelta(hours=hours_back)
-    # Forecast: from last_obs to (last_obs + hours_ahead)
-    fore_end = last_obs + timedelta(hours=hours_ahead)
-
-    # Single continuous prediction from hind_start to fore_end
-    all_pred = predict(analysis, hind_start, fore_end, interval_min=10)
-
-    # Bias correction: compare recent observed vs predicted to close the gap
-    # Use last 6 hours of observed data to compute offset
-    recent_obs = [(t, v) for t, v in zip(times, values) if t >= last_obs - timedelta(hours=6)]
-    if len(recent_obs) >= 6:
-        bias_sum = 0.0
-        bias_n = 0
-        pred_lookup = {p["ts"][:16]: p["level"] for p in all_pred}
-        for t, v in recent_obs:
-            pk = t.isoformat()[:16]
-            if pk in pred_lookup:
-                bias_sum += v - pred_lookup[pk]
-                bias_n += 1
-        if bias_n > 0:
-            bias = bias_sum / bias_n
-            for p in all_pred:
-                p["level"] = round(p["level"] + bias, 4)
-
-    return {
-        "mmsi": mmsi,
-        "r2": analysis["r2"],
-        "rmse": analysis["rmse"],
-        "n_constituents": analysis["n_constituents"],
-        "observed_start": hind_start.isoformat(),
-        "observed_end": last_obs.isoformat(),
-        "predict_end": fore_end.isoformat(),
-        "predictions": all_pred,
-        "top_constituents": sorted(
-            analysis["constituents"].items(),
-            key=lambda x: x[1]["amp"], reverse=True
-        )[:10],
-    }
+    from tidal_cache import get_prediction
+    result = await get_prediction(mmsi, hours_ahead, hours_back)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
 
 
 @router.get("/station-names")
