@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initWS();
   setInterval(go, 60000); // fallback poll every 60s
 });
-async function go() { await Promise.all([loadNav(), loadStations(), loadRight()]) }
+async function go() { await Promise.all([loadNav(), loadStations(), loadVirtualMarkers(), loadRight()]) }
 
 // ── NAV ──
 async function loadNav() {
@@ -627,6 +627,37 @@ async function predictPanel(el) {
   }
 }
 
+// ── VIRTUAL STATION MAP MARKERS ──
+let _vMarkers = {};
+async function loadVirtualMarkers() {
+  try {
+    const vsList = await J('/virtual-stations');
+    // Remove old markers
+    Object.values(_vMarkers).forEach(m => m.remove());
+    _vMarkers = {};
+    for (const vs of vsList) {
+      const el = document.createElement('div');
+      el.style.cssText = 'width:24px;height:24px;display:flex;align-items:center;justify-content:center;cursor:pointer';
+      const dot = document.createElement('div');
+      dot.style.cssText = 'width:14px;height:14px;border-radius:3px;background:#ffcc00;border:2px solid #080c14;box-shadow:0 0 10px rgba(255,204,0,.5);transition:width .15s,height .15s';
+      dot.title = vs.name;
+      el.appendChild(dot);
+      el.onmouseenter = () => {
+        dot.style.width = '18px'; dot.style.height = '18px';
+        popup.setLngLat([vs.lon, vs.lat]).setHTML(
+          `<div class="pt" style="color:#ffcc00">📍 ${vs.name}</div>` +
+          `<div class="pr"><span class="l">Type</span>${vs.promoted ? 'Promoted' : 'Virtual'}</div>` +
+          `<div class="pr"><span class="l">Pos</span>${vs.lat.toFixed(4)}, ${vs.lon.toFixed(4)}</div>` +
+          `<div class="pr"><span class="l">Sources</span>${vs.source_mmsis}</div>` +
+          `<div class="pr"><span class="l">Obs</span>${vs.obs_count || 0}</div>`
+        ).addTo(map);
+      };
+      el.onmouseleave = () => { dot.style.width = '14px'; dot.style.height = '14px'; popup.remove(); };
+      _vMarkers[vs.id] = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([vs.lon, vs.lat]).addTo(map);
+    }
+  } catch (e) {}
+}
+
 // ── VIRTUAL STATION PREDICTION ──
 async function virtualPredict() {
   const info = $('pred-info');
@@ -656,7 +687,7 @@ async function virtualPredict() {
   }
 }
 
-// ── VIRTUAL STATION MANAGEMENT (in right panel alerts tab) ──
+// ── VIRTUAL STATION MANAGEMENT (in right panel) ──
 async function showVirtualUI() {
   const el = $('rc');
   let html = `<div class="aform">
@@ -671,16 +702,24 @@ async function showVirtualUI() {
     const vsList = await J('/virtual-stations');
     for (const vs of vsList) {
       const obs = vs.obs_count || 0;
+      // Get current predicted value as suggestion
+      let suggestWL = '';
+      try {
+        const vp = await J(`/tidal/virtual/${vs.id}?hours_ahead=1&hours_back=0`);
+        if (vp.predictions && vp.predictions.length) suggestWL = vp.predictions[vp.predictions.length - 1].level.toFixed(2);
+      } catch (e) {}
+      // Default timestamp = now in local format
+      const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
       html += `<div class="alert-item" style="flex-direction:column;align-items:flex-start;gap:4px">
         <div style="display:flex;width:100%;justify-content:space-between;align-items:center">
-          <span style="font-weight:700;color:var(--yellow)">${vs.name}</span>
+          <span style="font-weight:700;color:var(--yellow)">📍 ${vs.name}</span>
           <button class="alert-del" onclick="delVS(${vs.id})">✕</button>
         </div>
         <div style="font-size:.7rem;color:var(--t3)">${vs.lat.toFixed(4)}, ${vs.lon.toFixed(4)} · src: ${vs.source_mmsis}</div>
-        <div style="font-size:.7rem;color:var(--t2)">${obs} manual obs ${vs.promoted ? '· <span style="color:var(--neon)">✓ Promoted</span>' : obs >= 48 ? '· <button onclick="promoteVS(' + vs.id + ')" style="color:var(--neon);background:none;border:1px solid var(--neon);border-radius:4px;padding:1px 6px;font-size:.68rem;cursor:pointer">Promote</button>' : ''}</div>
-        <div style="display:flex;gap:4px;width:100%">
-          <input id="obs-ts-${vs.id}" type="datetime-local" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
-          <input id="obs-wl-${vs.id}" type="number" step="0.01" placeholder="WL (m)" style="width:70px;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
+        <div style="font-size:.7rem;color:var(--t2)">${obs} obs ${vs.promoted ? '· <span style="color:var(--neon)">✓ Promoted</span>' : obs >= 48 ? '· <button onclick="promoteVS(' + vs.id + ')" style="color:var(--neon);background:none;border:1px solid var(--neon);border-radius:4px;padding:1px 6px;font-size:.68rem;cursor:pointer">Promote</button>' : ''}</div>
+        <div style="display:flex;gap:4px;width:100%;align-items:center">
+          <input id="obs-ts-${vs.id}" type="datetime-local" value="${nowLocal}" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
+          <input id="obs-wl-${vs.id}" type="number" step="0.01" placeholder="${suggestWL || 'WL (m)'}" ${suggestWL ? 'value="' + suggestWL + '"' : ''} style="width:80px;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
           <button onclick="addObs(${vs.id})" style="background:var(--neon);color:var(--bg);border:none;padding:3px 8px;border-radius:4px;font-size:.7rem;font-weight:700;cursor:pointer">+</button>
         </div>
       </div>`;
@@ -693,10 +732,10 @@ async function createVS() {
   const name = $('vs-name').value, lat = $('vs-lat').value, lon = $('vs-lon').value, src = $('vs-src').value;
   if (!name || !lat || !lon || !src) return;
   await fetch(`${A}/virtual-stations?name=${encodeURIComponent(name)}&lat=${lat}&lon=${lon}&source_mmsis=${src}`, { method: 'POST' });
-  showVirtualUI();
+  loadVirtualMarkers(); showVirtualUI();
 }
-async function delVS(id) { await fetch(`${A}/virtual-stations/${id}`, { method: 'DELETE' }); showVirtualUI(); }
-async function promoteVS(id) { await fetch(`${A}/virtual-stations/${id}/promote`, { method: 'POST' }); showVirtualUI(); }
+async function delVS(id) { await fetch(`${A}/virtual-stations/${id}`, { method: 'DELETE' }); loadVirtualMarkers(); showVirtualUI(); }
+async function promoteVS(id) { await fetch(`${A}/virtual-stations/${id}/promote`, { method: 'POST' }); loadVirtualMarkers(); showVirtualUI(); }
 async function addObs(id) {
   const ts = $('obs-ts-' + id).value, wl = $('obs-wl-' + id).value;
   if (!ts || !wl) return;
