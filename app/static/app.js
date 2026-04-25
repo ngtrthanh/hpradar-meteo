@@ -505,8 +505,14 @@ async function predictPanel(el) {
   const mmsi = sel || 995741977;
   const s = STN.find(x => x.mmsi === mmsi);
   const nm = s ? sname(s) || mmsi : mmsi;
+  const showVirtual = !sel || [995741977, 995741986].includes(mmsi);
   el.innerHTML = `<div class="cgrid" style="grid-template-columns:1fr 280px">
-    <div class="cbox" style="height:auto;min-height:280px"><div class="ct" style="color:var(--neon)">🔮 ${nm} — 72h Observed + 48h Forecast</div><div class="cp" id="pred-chart"></div></div>
+    <div class="cbox" style="height:auto;min-height:280px">
+      <div class="ct" style="color:var(--neon);display:flex;gap:8px;align-items:center">🔮 ${nm} — 72h + 48h Forecast
+        ${showVirtual ? '<button onclick="virtualPredict()" style="margin-left:auto;background:var(--bg4);border:1px solid var(--border);color:var(--cyan);padding:2px 8px;border-radius:4px;font-size:.68rem;cursor:pointer">+ CFC-TKP Virtual</button>' : ''}
+      </div>
+      <div class="cp" id="pred-chart"></div>
+    </div>
     <div class="cbox" style="height:auto;min-height:280px;overflow-y:auto"><div class="ct">Analysis</div><div id="pred-info" style="font-size:.78rem;color:var(--t2)">Loading...</div></div>
   </div>`;
   await new Promise(r => setTimeout(r, 100));
@@ -616,6 +622,34 @@ async function predictPanel(el) {
   } catch (e) {
     $('pred-chart').innerHTML = `<div class="empty">Error: ${e.message}</div>`;
     $('pred-info').innerHTML = '<div class="empty">Analysis failed</div>';
+  }
+}
+
+// ── VIRTUAL STATION PREDICTION ──
+async function virtualPredict() {
+  const chart = $('pred-chart');
+  const info = $('pred-info');
+  if (!chart) return;
+  info.innerHTML = 'Loading CFC-TKP virtual prediction...';
+  try {
+    const vp = await J('/tidal/virtual?name=CFC-TKP&lat=20.961178&lon=106.754940&sources=995741977,995741986&hours_ahead=48&hours_back=72');
+    // Get existing traces and add virtual
+    const curData = chart.data || [];
+    Plotly.addTraces(chart, {
+      x: vp.predictions.map(r => r.ts), y: vp.predictions.map(r => r.level),
+      mode: 'lines', name: '🔮 CFC-TKP (virtual)',
+      line: { color: '#ffcc00', width: 2.5, dash: 'dashdot' }
+    });
+    // Update info
+    const wt = vp.sources || {};
+    info.innerHTML += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+      <div style="color:var(--yellow);font-weight:700">CFC-TKP Virtual Station</div>
+      <div style="font-size:.72rem;color:var(--t3)">20.961°N, 106.755°E</div>
+      <div style="margin-top:4px;font-size:.75rem">Interpolated from:</div>
+      ${Object.entries(wt).map(([m, w]) => `<div style="font-size:.72rem;color:var(--t2)">  ${m}: weight ${(w * 100).toFixed(0)}%</div>`).join('')}
+    </div>`;
+  } catch (e) {
+    info.innerHTML += `<div style="color:var(--red);margin-top:8px">Virtual prediction failed: ${e.message}</div>`;
   }
 }
 

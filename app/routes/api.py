@@ -259,6 +259,101 @@ async def tidal_predict(
     return result
 
 
+@router.get("/tidal/virtual")
+async def tidal_virtual(
+    name: str = Query("CFC-TKP"),
+    lat: float = Query(20.961178),
+    lon: float = Query(106.754940),
+    sources: str = Query("995741977,995741986", description="Comma-separated MMSIs to interpolate"),
+    hours_ahead: int = Query(48),
+    hours_back: int = Query(72),
+):
+    """Predict tide at a virtual point by inverse-distance interpolation of nearby stations."""
+    import math
+    from tidal_cache import get_prediction
+
+    mmsi_list = [int(m.strip()) for m in sources.split(",") if m.strip()]
+    if len(mmsi_list) < 2:
+        raise HTTPException(400, "Need at least 2 source stations")
+
+    # Get predictions for all source stations
+    preds = {}
+    weights = {}
+    for mmsi in mmsi_list:
+        result = await get_prediction(mmsi, hours_ahead, hours_back)
+        if "error" in result:
+            continue
+        preds[mmsi] = {p["ts"]: p["level"] for p in result["predictions"]}
+        # Get station coords
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT lat, lon FROM stations WHERE mmsi=$1", mmsi)
+        if row:
+            dlat = (lat - row["lat"]) * 111.32
+            dlon = (lon - row["lon"]) * 111.32 * math.cos(math.radians(lat))
+            d = max(math.sqrt(dlat**2 + dlon**2), 0.1)  # km
+            weights[mmsi] = 1.0 / d
+
+    if not preds:
+        raise HTTPException(400, "No valid source predictions")
+
+    # Normalize weights
+    total_w = sum(weights.values())
+    for k in weights:
+        weights[k] /= total_w
+
+    # Interpolate on a regular grid (10-min intervals)
+    if not preds:
+        raise HTTPException(400, "No valid source predictions")
+
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    # Find common time range
+    all_starts = []
+    all_ends = []
+    for p in preds.values():
+        ts_list = sorted(p.keys())
+        if ts_list:
+            all_starts.append(ts_list[0])
+            all_ends.append(ts_list[-1])
+    if not all_starts:
+        raise HTTPException(400, "No prediction data")
+
+    start_ts = max(all_starts)
+    end_ts = min(all_ends)
+
+    predictions = []
+    # Step through 10-min intervals
+    t = _dt.fromisoformat(start_ts)
+    t_end = _dt.fromisoformat(end_ts)
+    while t <= t_end:
+        ts_key = t.isoformat()[:16]  # match to minute
+        level = 0.0
+        w_sum = 0.0
+        for mmsi_k, pred_dict in preds.items():
+            # Find closest timestamp within 5 min
+            best = None
+            for pk, pv in pred_dict.items():
+                if pk[:16] == ts_key:
+                    best = pv
+                    break
+            if best is not None:
+                level += weights[mmsi_k] * best
+                w_sum += weights[mmsi_k]
+        if w_sum > 0:
+            predictions.append({"ts": t.isoformat(), "level": round(level / w_sum, 4)})
+        t += _td(minutes=10)
+
+    return {
+        "name": name,
+        "lat": lat,
+        "lon": lon,
+        "sources": {str(m): round(weights.get(m, 0), 3) for m in mmsi_list if m in weights},
+        "predictions": predictions,
+        "observed_end": predictions[-1]["ts"] if predictions else None,
+        "predict_end": predictions[-1]["ts"] if predictions else None,
+    }
+
+
 @router.get("/station-names")
 async def station_names():
     """Fetch shipnames from AIS ships_array and map to our station MMSIs."""
