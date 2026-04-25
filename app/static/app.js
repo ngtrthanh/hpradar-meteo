@@ -846,10 +846,12 @@ function sc(t, v, ok) { return `<div style="background:var(--bg3);border:1px sol
 
 // ── PLOTLY LAYOUT HELPER ──
 function pLayout(yTitle) {
+  const now = new Date().toISOString();
   return {
     paper_bgcolor: 'transparent', plot_bgcolor: 'transparent', font: { color: '#607090', size: 10 },
     xaxis: { gridcolor: '#1a2540', linecolor: '#1a2540' }, yaxis: { gridcolor: '#1a2540', linecolor: '#1a2540', title: { text: yTitle, font: { size: 10 } } },
-    margin: { t: 8, r: 8, b: 35, l: 45 }, showlegend: false
+    margin: { t: 8, r: 8, b: 35, l: 45 }, showlegend: false,
+    shapes: [{ type: 'line', x0: now, x1: now, y0: 0, y1: 1, yref: 'paper', line: { color: '#ffcc0060', width: 1, dash: 'dot' } }]
   };
 }
 
@@ -897,11 +899,12 @@ function initWS() {
 }
 function logger(msg) { if (typeof console !== 'undefined') console.log('[TideWatch]', msg) }
 
-// ── MOBILE BOTTOM SHEET SWIPE ──
+// ── MOBILE BOTTOM SHEET SWIPE (3 snap points) ──
 (function () {
   let startY = 0, startH = 0;
   const handle = document.getElementById('bhandle');
   if (!handle) return;
+  const SNAP_PEEK = 60, SNAP_HALF = window.innerHeight * 0.4, SNAP_FULL = window.innerHeight * 0.85;
   handle.addEventListener('touchstart', e => {
     startY = e.touches[0].clientY;
     const bot = document.getElementById('pbot');
@@ -912,18 +915,16 @@ function logger(msg) { if (typeof console !== 'undefined') console.log('[TideWat
     e.preventDefault();
     const dy = startY - e.touches[0].clientY;
     const bot = document.getElementById('pbot');
-    const nh = Math.max(60, Math.min(window.innerHeight * .85, startH + dy));
-    bot.style.maxHeight = nh + 'px';
+    bot.style.maxHeight = Math.max(SNAP_PEEK, Math.min(SNAP_FULL, startH + dy)) + 'px';
   }, { passive: false });
   handle.addEventListener('touchend', () => {
     const bot = document.getElementById('pbot');
     bot.style.transition = 'max-height .3s ease';
     const h = bot.getBoundingClientRect().height;
-    if (h < 120) {
-      bot.classList.add('collapsed');
-    } else {
-      bot.classList.remove('collapsed');
-      bot.style.maxHeight = Math.min(h, window.innerHeight * .85) + 'px';
-    }
+    // Snap to nearest: peek / half / full
+    const dPeek = Math.abs(h - SNAP_PEEK), dHalf = Math.abs(h - SNAP_HALF), dFull = Math.abs(h - SNAP_FULL);
+    const snap = dPeek < dHalf ? SNAP_PEEK : dHalf < dFull ? SNAP_HALF : SNAP_FULL;
+    bot.style.maxHeight = snap + 'px';
+    bot.classList.toggle('collapsed', snap === SNAP_PEEK);
   });
 })();
