@@ -2,10 +2,10 @@ services:
   hydro-api:
     image: ghcr.io/ngtrthanh/hpradar-meteo:latest
     build: .
-    container_name: hydro-api
+    container_name: hydro-api-dev
     restart: unless-stopped
     ports:
-      - "8113:8000"
+      - "8114:8000"
     environment:
       - DB_HOST=${DB_HOST:-100.100.40.89}
       - DB_PORT=${DB_PORT:-5432}
@@ -31,7 +31,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: cloudflared
+    container_name: cloudflared-dev
     restart: unless-stopped
     command: tunnel run
     environment:

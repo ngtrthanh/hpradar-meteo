@@ -519,6 +519,7 @@ async function predictPanel(el) {
     const obsS = obs.filter(r => r.waterlevel != null).sort((a, b) => new Date(a.ts) - new Date(b.ts));
     const predPts = pred.predictions;
     const lastObs = pred.observed_end;
+    const goodFit = pred.r2 > 0.7;
 
     // Split prediction into hindcast and forecast
     const hindcast = predPts.filter(r => r.ts <= lastObs);
@@ -545,8 +546,10 @@ async function predictPanel(el) {
       },
       // Forecast
       {
-        x: forecast.map(r => r.ts), y: forecast.map(r => r.level), mode: 'lines', name: 'Forecast',
-        line: { color: '#ff00aa', width: 2.5 }, fill: 'tozeroy', fillcolor: 'rgba(255,0,170,0.06)'
+        x: forecast.map(r => r.ts), y: forecast.map(r => r.level), mode: 'lines',
+        name: goodFit ? 'Forecast' : 'Forecast (low confidence)',
+        line: { color: goodFit ? '#ff00aa' : '#ff00aa80', width: goodFit ? 2.5 : 1.5, dash: goodFit ? 'solid' : 'dot' },
+        fill: 'tozeroy', fillcolor: goodFit ? 'rgba(255,0,170,0.06)' : 'rgba(255,0,170,0.02)'
       },
     ];
     if (highs.length) traces.push({
@@ -596,7 +599,8 @@ async function predictPanel(el) {
     if (highs.length) info += `<div style="padding:4px 0;font-size:.78rem"><span style="color:var(--yellow)">▲ Next HW:</span> ${highs[0].level.toFixed(2)}m at ${new Date(highs[0].ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>`;
     if (lows.length) info += `<div style="padding:4px 0;font-size:.78rem"><span style="color:var(--cyan)">▼ Next LW:</span> ${lows[0].level.toFixed(2)}m at ${new Date(lows[0].ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>`;
     info += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-      <div style="color:var(--neon);font-weight:700">R² = ${pred.r2.toFixed(4)}</div>
+      <div style="color:${pred.r2 > 0.8 ? 'var(--neon)' : pred.r2 > 0.5 ? 'var(--yellow)' : 'var(--red)'};font-weight:700">R² = ${pred.r2.toFixed(4)}</div>
+      ${!goodFit ? '<div style="color:var(--yellow);font-size:.72rem;margin:4px 0">⚠ Low model fit — prediction unreliable. Needs more data or stronger tidal signal.</div>' : ''}
       <div>RMSE = ${(pred.rmse * 100).toFixed(1)} cm</div>
       <div>${pred.n_constituents} constituents</div>
     </div>`;

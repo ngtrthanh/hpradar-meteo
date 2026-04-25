@@ -97,15 +97,11 @@ async def get_station_detail(mmsi: int):
             raise HTTPException(404, "Station not found")
 
         latest_meteo = await conn.fetchrow(
-            "SELECT ts, wspeed, wdir, quality FROM meteo_obs WHERE mmsi=$1 ORDER BY ts DESC LIMIT 1", mmsi)
+            "SELECT ts, wspeed, wdir FROM meteo_obs WHERE mmsi=$1 ORDER BY ts DESC LIMIT 1", mmsi)
         latest_hydro = await conn.fetchrow(
-            "SELECT ts, waterlevel, seastate, quality FROM hydro_obs WHERE mmsi=$1 ORDER BY ts DESC LIMIT 1", mmsi)
+            "SELECT ts, waterlevel, seastate FROM hydro_obs WHERE mmsi=$1 ORDER BY ts DESC LIMIT 1", mmsi)
         meteo_count = await conn.fetchval("SELECT COUNT(*) FROM meteo_obs WHERE mmsi=$1", mmsi)
         hydro_count = await conn.fetchval("SELECT COUNT(*) FROM hydro_obs WHERE mmsi=$1", mmsi)
-        quality_dist = await conn.fetch(
-            "SELECT quality, COUNT(*) as cnt FROM meteo_obs WHERE mmsi=$1 GROUP BY quality "
-            "UNION ALL "
-            "SELECT quality, COUNT(*) as cnt FROM hydro_obs WHERE mmsi=$1 GROUP BY quality", mmsi, mmsi)
 
     def row_to_dict(r):
         if not r: return None
@@ -120,7 +116,6 @@ async def get_station_detail(mmsi: int):
         "latest_hydro": row_to_dict(latest_hydro),
         "meteo_count": meteo_count,
         "hydro_count": hydro_count,
-        "quality_distribution": [dict(r) for r in quality_dist],
     }
 
 
@@ -156,20 +151,12 @@ async def get_hydro(
     pool = await db.get_pool()
     lim = _clamp_limit(limit)
     clauses, params = _build_filters(mmsi, start, end)
-    if not raw:
-        clauses += (" AND " if "WHERE" in clauses else " WHERE ") + "(quality IS NULL OR quality = 0)"
-    q = f"SELECT mmsi, ts, waterlevel, seastate, quality FROM hydro_obs {clauses} ORDER BY ts DESC LIMIT {lim}"
+    q = f"SELECT mmsi, ts, waterlevel, seastate FROM hydro_obs {clauses} ORDER BY ts DESC LIMIT {lim}"
 
     async with pool.acquire() as conn:
-        try:
-            rows = await conn.fetch(q, *params)
-        except Exception:
-            # quality column may not exist
-            q2 = f"SELECT mmsi, ts, waterlevel, seastate FROM hydro_obs {_build_filters(mmsi, start, end)[0]} ORDER BY ts DESC LIMIT {lim}"
-            rows = await conn.fetch(q2, *_build_filters(mmsi, start, end)[1])
+        rows = await conn.fetch(q, *params)
     return [{"mmsi": r["mmsi"], "ts": r["ts"].isoformat(),
-             "waterlevel": r["waterlevel"], "seastate": r["seastate"],
-             "quality": r.get("quality")}
+             "waterlevel": r["waterlevel"], "seastate": r["seastate"]}
             for r in rows]
 
 
@@ -240,7 +227,6 @@ async def tidal_analyze(mmsi: int, limit: int = Query(5000)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 AND waterlevel IS NOT NULL "
-            "AND (quality IS NULL OR quality = 0) "
             "ORDER BY ts DESC LIMIT $2", mmsi, _clamp_limit(limit))
     if len(rows) < 48:
         raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
@@ -268,7 +254,6 @@ async def tidal_predict(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 AND waterlevel IS NOT NULL "
-            "AND (quality IS NULL OR quality = 0) "
             "ORDER BY ts DESC LIMIT 5000", mmsi)
     if len(rows) < 48:
         raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
