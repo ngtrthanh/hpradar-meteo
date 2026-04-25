@@ -1,6 +1,7 @@
 """Tidal harmonic analysis and prediction.
 
 Simultaneous least-squares fit of tidal constituents with nodal corrections.
+Uses iteratively reweighted least squares (IRLS) for robustness against outliers.
 Frequencies from IHO/NOAA standard tables (degrees per hour).
 """
 
@@ -67,7 +68,7 @@ def _nodal_corrections(name: str, N: float) -> tuple[float, float]:
     if name in ('K1', 'J1', 'M1'):
         return 1.0 + 0.115 * math.cos(N), math.radians(-8.9 * math.sin(N))
     if name == 'OO1':
-        return 1.0 + 0.640 * math.cos(N), math.radians(-6.0 * math.sin(N))
+        return 1.0 + 0.640 * math.cos(N), 0.0
     if name in ('MF', 'MM', 'MSF'):
         return 1.0 - 0.130 * math.cos(N), 0.0
     return 1.0, 0.0
@@ -76,10 +77,15 @@ def _nodal_corrections(name: str, N: float) -> tuple[float, float]:
 def analyze(times: list[datetime], values: list[float],
             max_constituents: int = 37) -> dict:
     """
-    Harmonic analysis via simultaneous least-squares.
+    Harmonic analysis via iteratively reweighted least-squares (IRLS).
+
+    The IRLS approach fits tidal constituents and then downweights outlier
+    residuals (> 2σ) before refitting, making the analysis robust against
+    spike data that may slip through quality filters.
 
     Returns dict with:
-      mean, constituents: {name: {freq, amp, phase, f, u}}, r2, rmse
+      mean, constituents: {name: {freq, amp, phase, a, b, f, u}}, r2, rmse,
+      nodal_N (for prediction consistency)
     """
     n = len(times)
     if n < 48:
@@ -149,17 +155,48 @@ def analyze(times: list[datetime], values: list[float],
         A[:, 2 * j] = f * np.cos(phase)
         A[:, 2 * j + 1] = f * np.sin(phase)
 
-    # Solve normal equations: (A^T A) x = A^T y
-    ATA = A.T @ A
-    ATy = A.T @ y
+    # ── IRLS: Iteratively Reweighted Least Squares ──
+    # Start with uniform weights, then downweight outliers
+    weights = np.ones(n, dtype=np.float64)
 
-    # Regularize slightly for numerical stability
-    ATA += np.eye(2 * M) * 1e-10
+    for iteration in range(3):
+        # Weighted design matrix
+        W_sqrt = np.sqrt(weights)
+        Aw = A * W_sqrt[:, np.newaxis]
+        yw = y * W_sqrt
 
-    try:
-        x = np.linalg.solve(ATA, ATy)
-    except np.linalg.LinAlgError:
-        x = np.linalg.lstsq(A, y, rcond=None)[0]
+        # Solve normal equations: (Aw^T Aw) x = Aw^T yw
+        ATA = Aw.T @ Aw
+        ATy = Aw.T @ yw
+
+        # Regularize slightly for numerical stability
+        ATA += np.eye(2 * M) * 1e-10
+
+        try:
+            x = np.linalg.solve(ATA, ATy)
+        except np.linalg.LinAlgError:
+            x = np.linalg.lstsq(A * W_sqrt[:, np.newaxis], yw, rcond=None)[0]
+
+        # Compute residuals and update weights
+        residuals = y - A @ x
+        sigma = np.std(residuals[weights > 0.5]) if np.sum(weights > 0.5) > 10 else np.std(residuals)
+
+        if sigma < 1e-10 or iteration == 2:
+            break  # converged or last iteration
+
+        # Tukey bisquare-style: zero weight for > 3σ, reduced for > 2σ
+        abs_res = np.abs(residuals)
+        weights = np.ones(n, dtype=np.float64)
+        mask_suspect = abs_res > 2.0 * sigma
+        mask_outlier = abs_res > 3.0 * sigma
+        weights[mask_suspect] = np.maximum(0.0, 1.0 - ((abs_res[mask_suspect] - 2.0 * sigma) / sigma) ** 2)
+        weights[mask_outlier] = 0.0
+
+        n_down = int(np.sum(mask_suspect))
+        n_out = int(np.sum(mask_outlier))
+        if n_down > 0:
+            logger.info("IRLS iter %d: downweighted %d points (%d zeroed), σ=%.4f",
+                        iteration + 1, n_down, n_out, sigma)
 
     # Extract amplitudes and phases
     constituents = {}
@@ -179,13 +216,16 @@ def analyze(times: list[datetime], values: list[float],
             'u': round(math.degrees(us[j]), 4),
         }
 
-    # Compute fit quality
+    # Compute fit quality (using only well-weighted points)
     predicted = A @ x + mean
-    residuals = vals - predicted
-    ss_res = float(np.sum(residuals ** 2))
-    ss_tot = float(np.sum((vals - mean) ** 2))
+    good = weights > 0.5
+    residuals_good = vals[good] - predicted[good]
+    ss_res = float(np.sum(residuals_good ** 2))
+    ss_tot = float(np.sum((vals[good] - np.mean(vals[good])) ** 2))
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    rmse = float(np.sqrt(ss_res / n))
+    rmse = float(np.sqrt(ss_res / max(np.sum(good), 1)))
+
+    n_outliers = int(np.sum(~good))
 
     return {
         'mean': round(mean, 6),
@@ -193,8 +233,10 @@ def analyze(times: list[datetime], values: list[float],
         'r2': round(r2, 6),
         'rmse': round(rmse, 6),
         'n_points': n,
+        'n_outliers': n_outliers,
         'n_constituents': M,
         't0': t0.isoformat(),
+        'nodal_N': N,  # store for prediction consistency
     }
 
 
@@ -203,15 +245,19 @@ def predict(analysis: dict, start: datetime, end: datetime,
     """
     Generate tide predictions from analysis results.
 
+    Uses the same nodal corrections as the analysis for consistency.
     Returns list of {ts: ISO string, level: float}.
     """
     mean = analysis['mean']
     constituents = analysis['constituents']
     t0 = datetime.fromisoformat(analysis['t0'])
 
-    # Nodal corrections (use midpoint of prediction period)
-    mid = start + (end - start) / 2
-    N = _node_angle(mid.year, mid.month, mid.day)
+    # Use analysis-period nodal angle for consistency
+    N = analysis.get('nodal_N')
+    if N is None:
+        # Fallback: recompute at prediction midpoint
+        mid = start + (end - start) / 2
+        N = _node_angle(mid.year, mid.month, mid.day)
 
     results = []
     t = start
