@@ -2,10 +2,10 @@ services:
   hydro-api:
     image: ghcr.io/ngtrthanh/hpradar-meteo:latest
     build: .
-    container_name: hydro-api-dev
+    container_name: hydro-api
     restart: unless-stopped
     ports:
-      - "8114:8000"
+      - "8113:8000"
     environment:
       - DB_HOST=${DB_HOST:-100.100.40.89}
       - DB_PORT=${DB_PORT:-5432}
@@ -25,17 +25,4 @@ services:
         limits:
           memory: 512M
           cpus: '1.0'
-    security_opt:
-      - seccomp:unconfined
     privileged: true
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared-dev
-    restart: unless-stopped
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
-    depends_on:
-      hydro-api:
-        condition: service_healthy

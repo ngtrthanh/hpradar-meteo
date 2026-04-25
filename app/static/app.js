@@ -1,17 +1,21 @@
 const A = '/api';
-let STN = [], sel = null, map, popup, MK = {}, rCur = 'meteo', bCur = 'tide', searchQ = '';
+let STN = [], sel = null, map, popup, rCur = 'meteo', bCur = 'tide', searchQ = '';
 let timeRange = '24h', trStart = null, trEnd = null, lastRightData = [];
 const C = ['#00ffaa', '#00d4ff', '#ff00aa', '#ff8800', '#ffcc00', '#aa55ff', '#ff3355', '#55ffcc', '#00ff55', '#ff5500', '#55aaff', '#ff55aa'];
+const MK = new Map(); // marker cache
 
-// ── MAP LAYERS ──
-const LAYERS = {
-  Dark: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', '© CartoDB © OSM'],
-  Satellite: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', '© Esri'],
-  Topo: ['https://tile.opentopomap.org/{z}/{x}/{y}.png', '© OpenTopoMap'],
-  Light: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png', '© CartoDB © OSM'],
-  Ocean: ['https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', '© Esri'],
+// ── MAP STYLES ──
+const MAP_STYLES = {
+  'Dark': 'https://tiles.openfreemap.org/styles/dark',
+  'Positron': 'https://tiles.openfreemap.org/styles/positron',
+  'Liberty': 'https://tiles.openfreemap.org/styles/liberty',
+  'Bright': 'https://tiles.openfreemap.org/styles/bright',
+  'ESRI Satellite': { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: '© Esri' },
+  'ESRI Ocean': { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', attribution: '© Esri' },
+  'CartoDB Dark': { url: 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', attribution: '© CartoDB © OSM' },
+  'OpenTopo': { url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png', attribution: '© OpenTopoMap' },
 };
-let curLayer = 'Dark';
+let curStyle = 'Dark';
 
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', async () => {
@@ -35,34 +39,61 @@ async function loadNav() {
 
 // ── MAP ──
 function initMap() {
-  const L = LAYERS[curLayer];
+  const style = MAP_STYLES[curStyle];
+  const isVector = typeof style === 'string';
   map = new maplibregl.Map({
     container: 'map',
-    style: { version: 8, sources: { base: { type: 'raster', tiles: [L[0]], tileSize: 256, attribution: L[1] } }, layers: [{ id: 'base', type: 'raster', source: 'base' }] },
-    center: [10, 35], zoom: 3, attributionControl: false
+    style: isVector ? style : {
+      version: 8,
+      sources: { base: { type: 'raster', tiles: [style.url], tileSize: 256, attribution: style.attribution } },
+      layers: [{ id: 'base', type: 'raster', source: 'base' }]
+    },
+    center: [10, 35], zoom: 3, attributionControl: false,
+    projection: 'globe',
   });
-  map.addControl(new maplibregl.NavigationControl(), 'top-right');
-  map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+  map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+  map.addControl(new maplibregl.ScaleControl({ maxWidth: 150, unit: 'metric' }), 'bottom-left');
+  map.addControl(new maplibregl.FullscreenControl(), 'bottom-right');
   popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: 14, maxWidth: '240px' });
 }
 
 function buildLayerSw() {
-  $('lsw').innerHTML = Object.keys(LAYERS).map(k => `<button class="lbtn${k === curLayer ? ' on' : ''}" onclick="switchLayer('${k}')">${k}</button>`).join('');
+  $('lsw').innerHTML = `<select id="style-sel" onchange="switchStyle(this.value)" style="background:var(--bg2);border:1px solid var(--border);color:var(--t1);padding:4px 8px;border-radius:5px;font-size:.7rem;outline:none;cursor:pointer">
+    ${Object.keys(MAP_STYLES).map(k => `<option value="${k}"${k === curStyle ? ' selected' : ''}>${k}</option>`).join('')}
+  </select>
+  <button class="lbtn${map.getProjection?.()?.type === 'globe' ? ' on' : ''}" onclick="toggleProj()" id="proj-btn" title="Globe/Flat">🌐</button>`;
 }
 
-function switchLayer(name) {
-  curLayer = name;
-  const L = LAYERS[name];
-  const src = map.getSource('base');
-  if (src) { src.setTiles([L[0]]) }
-  buildLayerSw();
+function switchStyle(name) {
+  curStyle = name;
+  const style = MAP_STYLES[name];
+  const isVector = typeof style === 'string';
+  if (isVector) {
+    map.setStyle(style);
+  } else {
+    map.setStyle({
+      version: 8,
+      sources: { base: { type: 'raster', tiles: [style.url], tileSize: 256, attribution: style.attribution } },
+      layers: [{ id: 'base', type: 'raster', source: 'base' }]
+    });
+  }
+  // Re-add markers after style change
+  map.once('style.load', () => { MK.clear(); syncMK(); loadVirtualMarkers(); });
+}
+
+function toggleProj() {
+  const cur = map.getProjection?.()?.type || 'globe';
+  const next = cur === 'globe' ? 'mercator' : 'globe';
+  map.setProjection(next);
+  const btn = $('proj-btn');
+  if (btn) btn.classList.toggle('on', next === 'globe');
 }
 
 function syncMK() {
-  Object.keys(MK).forEach(k => { if (!STN.find(s => String(s.mmsi) === k)) { MK[k].remove(); delete MK[k] } });
+  MK.forEach((m, k) => { if (!STN.find(s => String(s.mmsi) === k)) { m.remove(); MK.delete(k); } });
   STN.forEach((s, i) => {
     if (!s.lat || !s.lon) return;
-    if (MK[s.mmsi]) { MK[s.mmsi].setLngLat([s.lon, s.lat]); return }
+    if (MK.has(String(s.mmsi))) { MK.get(String(s.mmsi)).setLngLat([s.lon, s.lat]); return }
     const c = C[i % C.length];
     const fresh = freshness(s);
     // Outer wrapper: fixed size, centers the dot inside
@@ -78,7 +109,7 @@ function syncMK() {
     wrap.onmouseleave = () => { dot.style.width = '12px'; dot.style.height = '12px'; dot.style.boxShadow = `0 0 10px ${c}80`; popup.remove() };
     wrap.onclick = () => pick(s.mmsi);
     wrap._dot = dot; wrap._color = c;
-    MK[s.mmsi] = new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([s.lon, s.lat]).addTo(map);
+    MK.set(String(s.mmsi), new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([s.lon, s.lat]).addTo(map));
   });
 }
 
@@ -179,7 +210,7 @@ async function pick(mmsi) {
   sel = sel === mmsi ? null : mmsi;
   renderList();
   // highlight marker — no map pan
-  Object.entries(MK).forEach(([k, m]) => {
+  MK.forEach((m, k) => {
     const wrap = m.getElement();
     const dot = wrap._dot, c = wrap._color;
     const on = Number(k) === sel;
