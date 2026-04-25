@@ -57,7 +57,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 
 /* MAP */
 .mw{grid-area:map;position:relative}
-#map{width:100%;height:100%}
+#map{width:100%;height:100%;background:#020408}
 .layer-sw{position:absolute;top:10px;left:10px;z-index:10;display:flex;gap:4px;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:3px}
 .lbtn{padding:4px 10px;font-size:.68rem;font-weight:600;color:var(--t3);border:none;background:none;border-radius:5px;cursor:pointer;transition:all .15s}
 .lbtn:hover{color:var(--t2)}.lbtn.on{background:var(--bg4);color:var(--neon)}

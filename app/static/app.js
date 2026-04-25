@@ -49,11 +49,17 @@ function initMap() {
       layers: [{ id: 'base', type: 'raster', source: 'base' }]
     },
     center: [10, 35], zoom: 3, attributionControl: false,
-    projection: 'globe',
   });
   map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 150, unit: 'metric' }), 'bottom-left');
   map.addControl(new maplibregl.FullscreenControl(), 'bottom-right');
+  if (maplibregl.GlobeControl) map.addControl(new maplibregl.GlobeControl(), 'bottom-right');
+  // Set globe projection after style loads
+  map.on('style.load', () => {
+    if (_proj === 'globe') {
+      try { map.setProjection({ type: 'globe' }); } catch (e) {}
+    }
+  });
   popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: 14, maxWidth: '240px' });
 }
 
@@ -62,8 +68,7 @@ let _proj = 'globe';
 function buildLayerSw() {
   $('lsw').innerHTML = `<select id="style-sel" onchange="switchStyle(this.value)" style="background:var(--bg2);border:1px solid var(--border);color:var(--t1);padding:4px 8px;border-radius:5px;font-size:.7rem;outline:none;cursor:pointer">
     ${Object.keys(MAP_STYLES).map(k => `<option value="${k}"${k === curStyle ? ' selected' : ''}>${k}</option>`).join('')}
-  </select>
-  <button class="lbtn${_proj === 'globe' ? ' on' : ''}" onclick="toggleProj()" id="proj-btn" title="Globe/Flat">${_proj === 'globe' ? '🌐' : '🗺️'}</button>`;
+  </select>`;
 }
 
 function switchStyle(name) {
@@ -79,16 +84,15 @@ function switchStyle(name) {
       layers: [{ id: 'base', type: 'raster', source: 'base' }]
     });
   }
-  // Re-add markers and projection after style change
   map.once('style.load', () => {
-    try { map.setProjection({ type: _proj }); } catch (e) { map.setProjection(_proj); }
+    try { map.setProjection({ type: _proj }); } catch (e) {}
     MK.clear(); syncMK(); loadVirtualMarkers();
   });
 }
 
 function toggleProj() {
   _proj = _proj === 'globe' ? 'mercator' : 'globe';
-  try { map.setProjection({ type: _proj }); } catch (e) { map.setProjection(_proj); }
+  try { map.setProjection({ type: _proj }); } catch (e) {}
   buildLayerSw();
 }
 
