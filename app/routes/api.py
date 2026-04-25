@@ -259,24 +259,136 @@ async def tidal_predict(
     return result
 
 
-@router.get("/tidal/virtual")
-async def tidal_virtual(
-    name: str = Query("CFC-TKP"),
-    lat: float = Query(20.961178),
-    lon: float = Query(106.754940),
-    sources: str = Query("995741977,995741986", description="Comma-separated MMSIs to interpolate"),
+# ── VIRTUAL STATIONS ──
+
+@router.get("/virtual-stations")
+async def list_virtual_stations():
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM virtual_stations ORDER BY id")
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["created_at"] = d["created_at"].isoformat() if d["created_at"] else None
+            # Count manual observations
+            obs_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM manual_obs WHERE station_id=$1", r["id"])
+            d["obs_count"] = obs_count
+            d["promoted"] = r["promoted_mmsi"] is not None
+            result.append(d)
+    return result
+
+
+@router.post("/virtual-stations")
+async def create_virtual_station(
+    name: str = Query(...),
+    lat: float = Query(...),
+    lon: float = Query(...),
+    source_mmsis: str = Query(..., description="Comma-separated MMSIs"),
+):
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO virtual_stations (name, lat, lon, source_mmsis) "
+            "VALUES ($1,$2,$3,$4) RETURNING *",
+            name, lat, lon, source_mmsis)
+    return dict(row)
+
+
+@router.delete("/virtual-stations/{station_id}")
+async def delete_virtual_station(station_id: int):
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM manual_obs WHERE station_id=$1", station_id)
+        await conn.execute("DELETE FROM virtual_stations WHERE id=$1", station_id)
+    return {"status": "deleted"}
+
+
+@router.post("/virtual-stations/{station_id}/obs")
+async def add_manual_obs(
+    station_id: int,
+    ts: str = Query(..., description="ISO timestamp"),
+    waterlevel: float = Query(...),
+    note: str = Query(""),
+):
+    """Add a manual water level measurement."""
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        vs = await conn.fetchrow("SELECT * FROM virtual_stations WHERE id=$1", station_id)
+        if not vs:
+            raise HTTPException(404, "Virtual station not found")
+        await conn.execute(
+            "INSERT INTO manual_obs (station_id, ts, waterlevel, note) VALUES ($1,$2,$3,$4)",
+            station_id, datetime.fromisoformat(ts), waterlevel, note)
+    return {"status": "ok"}
+
+
+@router.get("/virtual-stations/{station_id}/obs")
+async def get_manual_obs(station_id: int, limit: int = Query(500)):
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT ts, waterlevel, note FROM manual_obs WHERE station_id=$1 ORDER BY ts DESC LIMIT $2",
+            station_id, _clamp_limit(limit))
+    return [{"ts": r["ts"].isoformat(), "waterlevel": r["waterlevel"], "note": r["note"]} for r in rows]
+
+
+@router.post("/virtual-stations/{station_id}/promote")
+async def promote_virtual_station(station_id: int):
+    """Promote virtual station to real station once enough manual obs exist (≥48)."""
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        vs = await conn.fetchrow("SELECT * FROM virtual_stations WHERE id=$1", station_id)
+        if not vs:
+            raise HTTPException(404, "Virtual station not found")
+        obs_count = await conn.fetchval("SELECT COUNT(*) FROM manual_obs WHERE station_id=$1", station_id)
+        if obs_count < 48:
+            raise HTTPException(400, f"Need ≥48 observations to promote, got {obs_count}")
+
+        # Create a pseudo-MMSI (900000000 + station_id)
+        mmsi = 900000000 + station_id
+        await conn.execute(
+            "INSERT INTO stations (mmsi, lon, lat, country) VALUES ($1,$2,$3,$4) "
+            "ON CONFLICT (mmsi) DO NOTHING",
+            mmsi, vs["lon"], vs["lat"], "Virtual")
+        # Copy manual obs to hydro_obs
+        obs = await conn.fetch("SELECT ts, waterlevel FROM manual_obs WHERE station_id=$1 ORDER BY ts", station_id)
+        await conn.executemany(
+            "INSERT INTO hydro_obs (mmsi, ts, waterlevel) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+            [(mmsi, r["ts"], r["waterlevel"]) for r in obs])
+        await conn.execute("UPDATE virtual_stations SET promoted_mmsi=$1 WHERE id=$2", mmsi, station_id)
+    return {"status": "promoted", "mmsi": mmsi, "obs_copied": obs_count}
+
+
+@router.get("/tidal/virtual/{station_id}")
+async def tidal_virtual_predict(
+    station_id: int,
     hours_ahead: int = Query(48),
     hours_back: int = Query(72),
 ):
-    """Predict tide at a virtual point by inverse-distance interpolation of nearby stations."""
+    """Predict tide at virtual station — uses own data if promoted, else interpolates."""
     import math
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        vs = await conn.fetchrow("SELECT * FROM virtual_stations WHERE id=$1", station_id)
+    if not vs:
+        raise HTTPException(404, "Virtual station not found")
+
+    # If promoted, use the real tidal prediction
+    if vs["promoted_mmsi"]:
+        from tidal_cache import get_prediction
+        result = await get_prediction(vs["promoted_mmsi"], hours_ahead, hours_back)
+        if "error" not in result:
+            result["name"] = vs["name"]
+            result["virtual_station_id"] = station_id
+            result["mode"] = "own_model"
+            return result
+
+    # Otherwise interpolate from source stations
     from tidal_cache import get_prediction
+    mmsi_list = [int(m.strip()) for m in vs["source_mmsis"].split(",") if m.strip()]
+    lat, lon = vs["lat"], vs["lon"]
 
-    mmsi_list = [int(m.strip()) for m in sources.split(",") if m.strip()]
-    if len(mmsi_list) < 2:
-        raise HTTPException(400, "Need at least 2 source stations")
-
-    # Get predictions for all source stations
     preds = {}
     weights = {}
     for mmsi in mmsi_list:
@@ -284,72 +396,50 @@ async def tidal_virtual(
         if "error" in result:
             continue
         preds[mmsi] = {p["ts"]: p["level"] for p in result["predictions"]}
-        # Get station coords
-        pool = await db.get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT lat, lon FROM stations WHERE mmsi=$1", mmsi)
         if row:
             dlat = (lat - row["lat"]) * 111.32
             dlon = (lon - row["lon"]) * 111.32 * math.cos(math.radians(lat))
-            d = max(math.sqrt(dlat**2 + dlon**2), 0.1)  # km
+            d = max(math.sqrt(dlat**2 + dlon**2), 0.1)
             weights[mmsi] = 1.0 / d
 
     if not preds:
         raise HTTPException(400, "No valid source predictions")
 
-    # Normalize weights
     total_w = sum(weights.values())
     for k in weights:
         weights[k] /= total_w
 
-    # Interpolate on a regular grid (10-min intervals)
-    if not preds:
-        raise HTTPException(400, "No valid source predictions")
-
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    # Find common time range
-    all_starts = []
-    all_ends = []
-    for p in preds.values():
-        ts_list = sorted(p.keys())
-        if ts_list:
-            all_starts.append(ts_list[0])
-            all_ends.append(ts_list[-1])
-    if not all_starts:
-        raise HTTPException(400, "No prediction data")
-
-    start_ts = max(all_starts)
-    end_ts = min(all_ends)
-
+    # Aligned 10-min grid
+    from datetime import datetime as _dt, timedelta as _td
+    all_starts = [min(p.keys()) for p in preds.values()]
+    all_ends = [max(p.keys()) for p in preds.values()]
+    t = _dt.fromisoformat(max(all_starts))
+    t_end = _dt.fromisoformat(min(all_ends))
     predictions = []
-    # Step through 10-min intervals
-    t = _dt.fromisoformat(start_ts)
-    t_end = _dt.fromisoformat(end_ts)
     while t <= t_end:
-        ts_key = t.isoformat()[:16]  # match to minute
+        tk = t.isoformat()[:16]
         level = 0.0
-        w_sum = 0.0
-        for mmsi_k, pred_dict in preds.items():
-            # Find closest timestamp within 5 min
-            best = None
-            for pk, pv in pred_dict.items():
-                if pk[:16] == ts_key:
-                    best = pv
+        ws = 0.0
+        for mk, pd in preds.items():
+            for pk, pv in pd.items():
+                if pk[:16] == tk:
+                    level += weights[mk] * pv
+                    ws += weights[mk]
                     break
-            if best is not None:
-                level += weights[mmsi_k] * best
-                w_sum += weights[mmsi_k]
-        if w_sum > 0:
-            predictions.append({"ts": t.isoformat(), "level": round(level / w_sum, 4)})
+        if ws > 0:
+            predictions.append({"ts": t.isoformat(), "level": round(level / ws, 4)})
         t += _td(minutes=10)
 
     return {
-        "name": name,
+        "name": vs["name"],
         "lat": lat,
         "lon": lon,
+        "virtual_station_id": station_id,
+        "mode": "interpolated",
         "sources": {str(m): round(weights.get(m, 0), 3) for m in mmsi_list if m in weights},
         "predictions": predictions,
-        "observed_end": predictions[-1]["ts"] if predictions else None,
         "predict_end": predictions[-1]["ts"] if predictions else None,
     }
 

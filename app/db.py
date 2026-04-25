@@ -72,6 +72,21 @@ async def _ensure_schema(pool: asyncpg.Pool):
             "ALTER TABLE hydro_obs ADD COLUMN IF NOT EXISTS quality SMALLINT DEFAULT 0",
             "CREATE INDEX IF NOT EXISTS idx_meteo_ts ON meteo_obs (ts DESC)",
             "CREATE INDEX IF NOT EXISTS idx_hydro_ts ON hydro_obs (ts DESC)",
+            """CREATE TABLE IF NOT EXISTS virtual_stations (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                lat DOUBLE PRECISION NOT NULL,
+                lon DOUBLE PRECISION NOT NULL,
+                source_mmsis TEXT NOT NULL,
+                promoted_mmsi BIGINT,
+                created_at TIMESTAMPTZ DEFAULT NOW())""",
+            """CREATE TABLE IF NOT EXISTS manual_obs (
+                id SERIAL PRIMARY KEY,
+                station_id INT NOT NULL,
+                ts TIMESTAMPTZ NOT NULL,
+                waterlevel DOUBLE PRECISION,
+                note TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW())""",
             """CREATE TABLE IF NOT EXISTS alerts (
                 id SERIAL PRIMARY KEY, mmsi BIGINT,
                 field TEXT NOT NULL, operator TEXT NOT NULL DEFAULT '>',

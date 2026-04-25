@@ -318,6 +318,8 @@ async function loadRight() {
           ev.slice(0, 30).map(e => `<div class="alert-item"><span>${e.mmsi} = ${e.value?.toFixed(2) ?? '—'}</span><span style="color:var(--t3)">${ago(e.triggered_at)}</span></div>`).join('');
         el.innerHTML = html || '<div class="empty">No alerts</div>';
       } catch (e) { el.innerHTML = '<div class="empty">Alerts unavailable</div>' }
+    } else if (rCur === 'virtual') {
+      await showVirtualUI(); return;
     }
   } catch (e) { el.innerHTML = '<div class="empty">Load failed</div>' }
 }
@@ -505,11 +507,11 @@ async function predictPanel(el) {
   const mmsi = sel || 995741977;
   const s = STN.find(x => x.mmsi === mmsi);
   const nm = s ? sname(s) || mmsi : mmsi;
-  const showVirtual = !sel || [995741977, 995741986].includes(mmsi);
+  const showVirtual = true;
   el.innerHTML = `<div class="cgrid" style="grid-template-columns:1fr 280px">
     <div class="cbox" style="height:auto;min-height:280px">
       <div class="ct" style="color:var(--neon);display:flex;gap:8px;align-items:center">🔮 ${nm} — 72h + 48h Forecast
-        ${showVirtual ? '<button onclick="virtualPredict()" style="margin-left:auto;background:var(--bg4);border:1px solid var(--border);color:var(--cyan);padding:2px 8px;border-radius:4px;font-size:.68rem;cursor:pointer">+ CFC-TKP Virtual</button>' : ''}
+        ${showVirtual ? '<button onclick="virtualPredict()" style="margin-left:auto;background:var(--bg4);border:1px solid var(--border);color:var(--cyan);padding:2px 8px;border-radius:4px;font-size:.68rem;cursor:pointer">+ Virtual Stations</button>' : ''}
       </div>
       <div class="cp" id="pred-chart"></div>
     </div>
@@ -627,30 +629,79 @@ async function predictPanel(el) {
 
 // ── VIRTUAL STATION PREDICTION ──
 async function virtualPredict() {
-  const chart = $('pred-chart');
   const info = $('pred-info');
-  if (!chart) return;
-  info.innerHTML = 'Loading CFC-TKP virtual prediction...';
   try {
-    const vp = await J('/tidal/virtual?name=CFC-TKP&lat=20.961178&lon=106.754940&sources=995741977,995741986&hours_ahead=48&hours_back=72');
-    // Get existing traces and add virtual
-    const curData = chart.data || [];
-    Plotly.addTraces(chart, {
-      x: vp.predictions.map(r => r.ts), y: vp.predictions.map(r => r.level),
-      mode: 'lines', name: '🔮 CFC-TKP (virtual)',
-      line: { color: '#ffcc00', width: 2.5, dash: 'dashdot' }
-    });
-    // Update info
-    const wt = vp.sources || {};
-    info.innerHTML += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-      <div style="color:var(--yellow);font-weight:700">CFC-TKP Virtual Station</div>
-      <div style="font-size:.72rem;color:var(--t3)">20.961°N, 106.755°E</div>
-      <div style="margin-top:4px;font-size:.75rem">Interpolated from:</div>
-      ${Object.entries(wt).map(([m, w]) => `<div style="font-size:.72rem;color:var(--t2)">  ${m}: weight ${(w * 100).toFixed(0)}%</div>`).join('')}
-    </div>`;
+    // Get virtual stations
+    const vsList = await J('/virtual-stations');
+    if (!vsList.length) {
+      info.innerHTML += '<div style="color:var(--yellow);margin-top:8px">No virtual stations. Create one first.</div>';
+      return;
+    }
+    for (const vs of vsList) {
+      const vp = await J(`/tidal/virtual/${vs.id}?hours_ahead=48&hours_back=72`);
+      Plotly.addTraces($('pred-chart'), {
+        x: vp.predictions.map(r => r.ts), y: vp.predictions.map(r => r.level),
+        mode: 'lines', name: `🔮 ${vp.name} (${vp.mode})`,
+        line: { color: '#ffcc00', width: 2.5, dash: vp.mode === 'own_model' ? 'solid' : 'dashdot' }
+      });
+      const src = vp.sources || {};
+      info.innerHTML += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <div style="color:var(--yellow);font-weight:700">${vp.name}</div>
+        <div style="font-size:.72rem;color:var(--t3)">${vp.lat.toFixed(4)}°N, ${vp.lon.toFixed(4)}°E · ${vp.mode}</div>
+        ${Object.entries(src).map(([m, w]) => `<div style="font-size:.72rem;color:var(--t2)">  ${m}: ${(w * 100).toFixed(0)}%</div>`).join('')}
+      </div>`;
+    }
   } catch (e) {
-    info.innerHTML += `<div style="color:var(--red);margin-top:8px">Virtual prediction failed: ${e.message}</div>`;
+    info.innerHTML += `<div style="color:var(--red);margin-top:8px">Error: ${e.message}</div>`;
   }
+}
+
+// ── VIRTUAL STATION MANAGEMENT (in right panel alerts tab) ──
+async function showVirtualUI() {
+  const el = $('rc');
+  let html = `<div class="aform">
+    <div style="font-size:.72rem;color:var(--t3);text-transform:uppercase;font-weight:700;margin-bottom:4px">Add Virtual Station</div>
+    <input id="vs-name" placeholder="Name (e.g. CFC-TKP)">
+    <input id="vs-lat" type="number" step="0.0001" placeholder="Latitude">
+    <input id="vs-lon" type="number" step="0.0001" placeholder="Longitude">
+    <input id="vs-src" placeholder="Source MMSIs (comma-sep)">
+    <button class="abtn" onclick="createVS()">+ Create</button>
+  </div>`;
+  try {
+    const vsList = await J('/virtual-stations');
+    for (const vs of vsList) {
+      const obs = vs.obs_count || 0;
+      html += `<div class="alert-item" style="flex-direction:column;align-items:flex-start;gap:4px">
+        <div style="display:flex;width:100%;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;color:var(--yellow)">${vs.name}</span>
+          <button class="alert-del" onclick="delVS(${vs.id})">✕</button>
+        </div>
+        <div style="font-size:.7rem;color:var(--t3)">${vs.lat.toFixed(4)}, ${vs.lon.toFixed(4)} · src: ${vs.source_mmsis}</div>
+        <div style="font-size:.7rem;color:var(--t2)">${obs} manual obs ${vs.promoted ? '· <span style="color:var(--neon)">✓ Promoted</span>' : obs >= 48 ? '· <button onclick="promoteVS(' + vs.id + ')" style="color:var(--neon);background:none;border:1px solid var(--neon);border-radius:4px;padding:1px 6px;font-size:.68rem;cursor:pointer">Promote</button>' : ''}</div>
+        <div style="display:flex;gap:4px;width:100%">
+          <input id="obs-ts-${vs.id}" type="datetime-local" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
+          <input id="obs-wl-${vs.id}" type="number" step="0.01" placeholder="WL (m)" style="width:70px;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
+          <button onclick="addObs(${vs.id})" style="background:var(--neon);color:var(--bg);border:none;padding:3px 8px;border-radius:4px;font-size:.7rem;font-weight:700;cursor:pointer">+</button>
+        </div>
+      </div>`;
+    }
+  } catch (e) {}
+  el.innerHTML = html;
+}
+
+async function createVS() {
+  const name = $('vs-name').value, lat = $('vs-lat').value, lon = $('vs-lon').value, src = $('vs-src').value;
+  if (!name || !lat || !lon || !src) return;
+  await fetch(`${A}/virtual-stations?name=${encodeURIComponent(name)}&lat=${lat}&lon=${lon}&source_mmsis=${src}`, { method: 'POST' });
+  showVirtualUI();
+}
+async function delVS(id) { await fetch(`${A}/virtual-stations/${id}`, { method: 'DELETE' }); showVirtualUI(); }
+async function promoteVS(id) { await fetch(`${A}/virtual-stations/${id}/promote`, { method: 'POST' }); showVirtualUI(); }
+async function addObs(id) {
+  const ts = $('obs-ts-' + id).value, wl = $('obs-wl-' + id).value;
+  if (!ts || !wl) return;
+  await fetch(`${A}/virtual-stations/${id}/obs?ts=${new Date(ts).toISOString()}&waterlevel=${wl}`, { method: 'POST' });
+  showVirtualUI();
 }
 
 // ── SYSTEM ──
