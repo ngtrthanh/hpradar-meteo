@@ -5,7 +5,7 @@ services:
     container_name: hydro-api
     restart: unless-stopped
     ports:
-      - "8111:8000"
+      - "8113:8000"
     environment:
       - DB_HOST=${DB_HOST:-100.100.40.89}
       - DB_PORT=${DB_PORT:-5432}
