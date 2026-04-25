@@ -284,7 +284,7 @@ async def station_names():
                         if len(row) > 31 and row[0] in mmsi_set and row[31]:
                             name = str(row[31]).strip()
                             if name and len(name) > 1:
-                                names[str(row[0])] = name.replace(' [V]', '').strip()
+                                names[str(row[0])] = name
                 except Exception:
                     continue
     except Exception:

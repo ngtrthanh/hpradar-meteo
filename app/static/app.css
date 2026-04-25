@@ -46,8 +46,8 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .si{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
 .si:hover{background:rgba(0,255,170,.03)}
 .si.on{background:linear-gradient(90deg,rgba(0,255,170,.08),transparent);border-left:3px solid var(--neon)}
-.si .nm{font-weight:700;font-size:.82rem;display:flex;justify-content:space-between}
-.si .nm .fl{font-size:.68rem;padding:1px 6px;border-radius:4px;background:var(--bg4);color:var(--t3)}
+.si .nm{font-weight:700;font-size:.82rem;display:flex;align-items:center;gap:5px}
+.si .nm .fl{font-size:.68rem;padding:1px 6px;border-radius:4px;background:var(--bg4);color:var(--t3);margin-left:auto}
 .si .sub{font-size:.7rem;color:var(--t3);margin-top:2px}
 .sdet{padding:12px;border-top:1px solid var(--border);background:var(--bg3);display:none}
 .sdet.show{display:block}
