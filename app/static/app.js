@@ -53,12 +53,9 @@ function initMap() {
   map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 150, unit: 'metric' }), 'bottom-left');
   map.addControl(new maplibregl.FullscreenControl(), 'bottom-right');
-  if (maplibregl.GlobeControl) map.addControl(new maplibregl.GlobeControl(), 'bottom-right');
-  // Set globe projection after style loads
+  map.addControl(new maplibregl.GlobeControl(), 'top-right');
   map.on('style.load', () => {
-    if (_proj === 'globe') {
-      try { map.setProjection({ type: 'globe' }); } catch (e) {}
-    }
+    map.setProjection({ type: 'globe' });
   });
   popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: 14, maxWidth: '240px' });
 }
