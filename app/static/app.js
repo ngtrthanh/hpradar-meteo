@@ -713,10 +713,10 @@ async function showVirtualUI() {
       html += `<div class="alert-item" style="flex-direction:column;align-items:flex-start;gap:4px">
         <div style="display:flex;width:100%;justify-content:space-between;align-items:center">
           <span style="font-weight:700;color:var(--yellow)">📍 ${vs.name}</span>
-          <button class="alert-del" onclick="delVS(${vs.id})">✕</button>
+          <button class="alert-del" onclick="delVS(${vs.id},'${vs.name.replace(/'/g,"\\'")}')">✕</button>
         </div>
         <div style="font-size:.7rem;color:var(--t3)">${vs.lat.toFixed(4)}, ${vs.lon.toFixed(4)} · src: ${vs.source_mmsis}</div>
-        <div style="font-size:.7rem;color:var(--t2)">${obs} obs ${vs.promoted ? '· <span style="color:var(--neon)">✓ Promoted</span>' : obs >= 48 ? '· <button onclick="promoteVS(' + vs.id + ')" style="color:var(--neon);background:none;border:1px solid var(--neon);border-radius:4px;padding:1px 6px;font-size:.68rem;cursor:pointer">Promote</button>' : ''}</div>
+        <div style="font-size:.7rem;color:var(--t2)">${obs} obs ${vs.promoted ? '· <span style="color:var(--neon)">✓ Promoted</span>' : obs >= 48 ? '· <button onclick="promoteVS(' + vs.id + ',\'' + vs.name.replace(/'/g,"\\'") + '\',' + obs + ')" style="color:var(--neon);background:none;border:1px solid var(--neon);border-radius:4px;padding:1px 6px;font-size:.68rem;cursor:pointer">🎓 Promote to Real Station</button>' : `· need ${48 - obs} more obs`}</div>
         <div style="display:flex;gap:4px;width:100%;align-items:center">
           <input id="obs-ts-${vs.id}" type="datetime-local" value="${nowLocal}" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
           <input id="obs-wl-${vs.id}" type="number" step="0.01" placeholder="${suggestWL || 'WL (m)'}" ${suggestWL ? 'value="' + suggestWL + '"' : ''} style="width:80px;background:var(--bg3);border:1px solid var(--border);color:var(--t1);padding:3px 6px;border-radius:4px;font-size:.7rem">
@@ -730,16 +730,32 @@ async function showVirtualUI() {
 
 async function createVS() {
   const name = $('vs-name').value, lat = $('vs-lat').value, lon = $('vs-lon').value, src = $('vs-src').value;
-  if (!name || !lat || !lon || !src) return;
+  if (!name || !lat || !lon || !src) { alert('Fill all fields'); return; }
+  if (!confirm(`Create virtual station "${name}" at ${lat}, ${lon}?\nSources: ${src}`)) return;
   await fetch(`${A}/virtual-stations?name=${encodeURIComponent(name)}&lat=${lat}&lon=${lon}&source_mmsis=${src}`, { method: 'POST' });
   loadVirtualMarkers(); showVirtualUI();
 }
-async function delVS(id) { await fetch(`${A}/virtual-stations/${id}`, { method: 'DELETE' }); loadVirtualMarkers(); showVirtualUI(); }
-async function promoteVS(id) { await fetch(`${A}/virtual-stations/${id}/promote`, { method: 'POST' }); loadVirtualMarkers(); showVirtualUI(); }
+async function delVS(id, name) {
+  const input = prompt(`Type "${name}" to confirm deletion:`);
+  if (input !== name) { if (input !== null) alert('Name does not match'); return; }
+  await fetch(`${A}/virtual-stations/${id}`, { method: 'DELETE' });
+  loadVirtualMarkers(); showVirtualUI();
+}
+async function promoteVS(id, name, obs) {
+  if (!confirm(`Promote "${name}" to a real station?\n\n${obs} manual observations will be copied to the main database.\nThis will enable its own harmonic tidal model.\n\nThis action cannot be undone.`)) return;
+  const resp = await fetch(`${A}/virtual-stations/${id}/promote`, { method: 'POST' });
+  const d = await resp.json();
+  if (d.mmsi) alert(`✓ Promoted! MMSI: ${d.mmsi}\n${d.obs_copied} observations copied.`);
+  loadVirtualMarkers(); showVirtualUI();
+}
 async function addObs(id) {
   const ts = $('obs-ts-' + id).value, wl = $('obs-wl-' + id).value;
   if (!ts || !wl) return;
   await fetch(`${A}/virtual-stations/${id}/obs?ts=${new Date(ts).toISOString()}&waterlevel=${wl}`, { method: 'POST' });
+  // Reset for next entry: advance timestamp, clear value
+  const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  $('obs-ts-' + id).value = now;
+  $('obs-wl-' + id).value = '';
   showVirtualUI();
 }
 
