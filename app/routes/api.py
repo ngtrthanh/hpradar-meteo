@@ -227,10 +227,12 @@ async def tidal_analyze(mmsi: int, limit: int = Query(5000)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 AND waterlevel IS NOT NULL "
-            "ORDER BY ts DESC LIMIT $2", mmsi, _clamp_limit(limit))
+            "ORDER BY ts ASC", mmsi)
     if len(rows) < 48:
         raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
-    rows = list(reversed(rows))
+    if len(rows) > 20000:
+        step = max(1, len(rows) // 20000)
+        rows = rows[::step]
     if len(rows) < 48:
         raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
 
@@ -252,12 +254,17 @@ async def tidal_predict(
     _validate_mmsi(mmsi)
     pool = await db.get_pool()
     async with pool.acquire() as conn:
+        # Fetch all available data, subsampled to ~hourly for wide span
         rows = await conn.fetch(
             "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 AND waterlevel IS NOT NULL "
-            "ORDER BY ts DESC LIMIT 5000", mmsi)
+            "ORDER BY ts ASC", mmsi)
     if len(rows) < 48:
         raise HTTPException(400, f"Need ≥48 points, got {len(rows)}")
-    rows = list(reversed(rows))  # oldest first for analysis
+
+    # Subsample to ~10min intervals if too dense (keeps matrix <20K rows)
+    if len(rows) > 20000:
+        step = max(1, len(rows) // 20000)
+        rows = rows[::step]
 
     from tidal import analyze, predict
     times = [r["ts"] for r in rows]
