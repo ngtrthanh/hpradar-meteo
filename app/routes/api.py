@@ -280,6 +280,23 @@ async def tidal_predict(
     # Single continuous prediction from hind_start to fore_end
     all_pred = predict(analysis, hind_start, fore_end, interval_min=10)
 
+    # Bias correction: compare recent observed vs predicted to close the gap
+    # Use last 6 hours of observed data to compute offset
+    recent_obs = [(t, v) for t, v in zip(times, values) if t >= last_obs - timedelta(hours=6)]
+    if len(recent_obs) >= 6:
+        bias_sum = 0.0
+        bias_n = 0
+        pred_lookup = {p["ts"][:16]: p["level"] for p in all_pred}
+        for t, v in recent_obs:
+            pk = t.isoformat()[:16]
+            if pk in pred_lookup:
+                bias_sum += v - pred_lookup[pk]
+                bias_n += 1
+        if bias_n > 0:
+            bias = bias_sum / bias_n
+            for p in all_pred:
+                p["level"] = round(p["level"] + bias, 4)
+
     return {
         "mmsi": mmsi,
         "r2": analysis["r2"],
