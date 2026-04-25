@@ -82,10 +82,11 @@ These are ideas, not mandates. Use them, remix them, or ignore them entirely:
 
 ## Deliverables
 
-1. `app/static/index.html` — entry point
-2. `app/static/` — all CSS, JS, assets
+1. Replace `app/static/index.html` — single file entry point
+2. You may add/modify `app/static/app.css` and `app/static/app.js` as needed
 3. Works when served by the existing FastAPI backend (`uvicorn main:app`)
-4. README or comments explaining your design decisions
+4. No build step required — the backend serves `app/static/` directly
+5. Brief comments explaining your design decisions
 
 ## How to develop
 
