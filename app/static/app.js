@@ -57,11 +57,13 @@ function initMap() {
   popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: 14, maxWidth: '240px' });
 }
 
+let _proj = 'globe';
+
 function buildLayerSw() {
   $('lsw').innerHTML = `<select id="style-sel" onchange="switchStyle(this.value)" style="background:var(--bg2);border:1px solid var(--border);color:var(--t1);padding:4px 8px;border-radius:5px;font-size:.7rem;outline:none;cursor:pointer">
     ${Object.keys(MAP_STYLES).map(k => `<option value="${k}"${k === curStyle ? ' selected' : ''}>${k}</option>`).join('')}
   </select>
-  <button class="lbtn${map.getProjection?.()?.type === 'globe' ? ' on' : ''}" onclick="toggleProj()" id="proj-btn" title="Globe/Flat">🌐</button>`;
+  <button class="lbtn${_proj === 'globe' ? ' on' : ''}" onclick="toggleProj()" id="proj-btn" title="Globe/Flat">${_proj === 'globe' ? '🌐' : '🗺️'}</button>`;
 }
 
 function switchStyle(name) {
@@ -77,16 +79,17 @@ function switchStyle(name) {
       layers: [{ id: 'base', type: 'raster', source: 'base' }]
     });
   }
-  // Re-add markers after style change
-  map.once('style.load', () => { MK.clear(); syncMK(); loadVirtualMarkers(); });
+  // Re-add markers and projection after style change
+  map.once('style.load', () => {
+    try { map.setProjection({ type: _proj }); } catch (e) { map.setProjection(_proj); }
+    MK.clear(); syncMK(); loadVirtualMarkers();
+  });
 }
 
 function toggleProj() {
-  const cur = map.getProjection?.()?.type || 'globe';
-  const next = cur === 'globe' ? 'mercator' : 'globe';
-  map.setProjection(next);
-  const btn = $('proj-btn');
-  if (btn) btn.classList.toggle('on', next === 'globe');
+  _proj = _proj === 'globe' ? 'mercator' : 'globe';
+  try { map.setProjection({ type: _proj }); } catch (e) { map.setProjection(_proj); }
+  buildLayerSw();
 }
 
 function syncMK() {
