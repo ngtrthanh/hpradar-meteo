@@ -1,5 +1,5 @@
 const A = '/api';
-let STN = [], sel = null, map, popup, rCur = 'meteo', bCur = 'tide', searchQ = '';
+let STN = [], sel = null, map, popup, rCur = 'meteo', bCur = 'charts', searchQ = '';
 let timeRange = '24h', trStart = null, trEnd = null, lastRightData = [];
 const C = ['#00ffaa', '#00d4ff', '#ff00aa', '#ff8800', '#ffcc00', '#aa55ff', '#ff3355', '#55ffcc', '#00ff55', '#ff5500', '#55aaff', '#ff55aa'];
 const MK = new Map(); // marker cache
@@ -248,10 +248,17 @@ async function updateCC() {
       <span class="cc-age">${ago(lastTs)}</span>
       <button class="cc-close" onclick="clearCC()">✕</button>`;
     app.classList.add('has-cc');
+    // Nav bar station indicator
+    const si = $('sel-indicator');
+    if (si) { si.style.display = 'block'; si.innerHTML = `${flag(s.country)} ${sname(s) || s.mmsi} ✕`; }
     setTimeout(() => map.resize(), 50);
   } catch (e) { app.classList.remove('has-cc') }
 }
-function clearCC() { sel = null; $('app').classList.remove('has-cc'); renderList(); $('sdet').classList.remove('show'); setTimeout(() => map.resize(), 50) }
+function clearCC() {
+  sel = null; $('app').classList.remove('has-cc'); renderList(); $('sdet').classList.remove('show');
+  const si = $('sel-indicator'); if (si) { si.style.display = 'none'; si.textContent = ''; }
+  setTimeout(() => map.resize(), 50);
+}
 
 async function loadDetail(mmsi) {
   const el = $('sdet');
@@ -333,24 +340,10 @@ async function loadRight() {
       $('einfo').textContent = d.length + ' rows';
       el.innerHTML = d.length ? `<table class="rt"><thead><tr><th>MMSI</th><th>Level</th><th>Sea</th><th>When</th></tr></thead><tbody>${d.map(r => `<tr><td>${r.mmsi}</td><td class="hi">${r.waterlevel ?? '—'}</td><td>${r.seastate ?? '—'}</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No hydro data</div>';
     } else if (rCur === 'alerts') {
-      $('einfo').textContent = '';
-      try {
-        const d = await J('/alerts'); const ev = d.recent_events || []; const al = d.alerts || [];
-        lastRightData = ev;
-        $('einfo').textContent = ev.length + ' events';
-        let html = `<div class="aform">
-          <select id="af-field"><option value="waterlevel">Water Level</option><option value="wspeed">Wind Speed</option></select>
-          <select id="af-op"><option value=">">&gt;</option><option value="<">&lt;</option><option value=">=">&gt;=</option><option value="<=">&lt;=</option></select>
-          <input id="af-val" type="number" step="0.1" placeholder="Threshold">
-          <button class="abtn" onclick="createAlert()">+ Create Alert${sel ? ' for ' + sel : ''}</button>
-        </div>`;
-        if (al.length) html += al.map(a => `<div class="alert-item"><span>${a.mmsi || 'All'} ${a.field} ${a.operator} ${a.threshold}</span><button class="alert-del" onclick="delAlert(${a.id})">✕</button></div>`).join('');
-        if (ev.length) html += `<div style="padding:8px 12px;font-size:.68rem;color:var(--t3);text-transform:uppercase;border-bottom:1px solid var(--border)">Recent Events</div>` +
-          ev.slice(0, 30).map(e => `<div class="alert-item"><span>${e.mmsi} = ${e.value?.toFixed(2) ?? '—'}</span><span style="color:var(--t3)">${ago(e.triggered_at)}</span></div>`).join('');
-        el.innerHTML = html || '<div class="empty">No alerts</div>';
-      } catch (e) { el.innerHTML = '<div class="empty">Alerts unavailable</div>' }
+      // Moved to bottom panel System tab
+      el.innerHTML = '<div class="empty">Alerts moved to ⚙ System tab in bottom panel</div>';
     } else if (rCur === 'virtual') {
-      await showVirtualUI(); return;
+      el.innerHTML = '<div class="empty">Virtual stations moved to ⚙ System tab in bottom panel</div>';
     }
   } catch (e) { el.innerHTML = '<div class="empty">Load failed</div>' }
 }
@@ -385,15 +378,35 @@ async function delAlert(id) {
 }
 
 // ── BOTTOM ──
-function bTab(t) { bCur = t; document.querySelectorAll('[data-b]').forEach(x => x.classList.toggle('on', x.dataset.b === t)); loadBot() }
+let bSub = 'tide'; // sub-tab within charts/forecast
+function bTab(t) {
+  bCur = t;
+  document.querySelectorAll('.bhead > .tb:first-child .tbtn').forEach(x => x.classList.toggle('on', x.dataset.b === t));
+  // Show sub-tabs
+  const st = $('sub-tabs');
+  if (t === 'charts') {
+    st.innerHTML = ['tide', 'wind'].map(s => `<button class="tbtn${bSub === s ? ' on' : ''}" onclick="bSubTab('${s}')">${s === 'tide' ? '🌊 Tide' : '💨 Wind Rose'}</button>`).join('');
+  } else if (t === 'forecast') {
+    st.innerHTML = ['predict', 'table', 'overlay'].map(s => `<button class="tbtn${bSub === s ? ' on' : ''}" onclick="bSubTab('${s}')">${s === 'predict' ? '🔮 Predict' : s === 'table' ? '📋 Tide Table' : '📊 Day Overlay'}</button>`).join('');
+  } else {
+    st.innerHTML = ['status', 'alerts', 'virtual'].map(s => `<button class="tbtn${bSub === s ? ' on' : ''}" onclick="bSubTab('${s}')">${s === 'status' ? '🖥 Status' : s === 'alerts' ? '⚡ Alerts' : '📍 Virtual'}</button>`).join('');
+  }
+  loadBot();
+}
+function bSubTab(s) { bSub = s; bTab(bCur); }
 async function loadBot() {
   const el = $('bbd');
-  if (bCur === 'tide') await tidePlots(el);
-  else if (bCur === 'wind') await windRose(el);
-  else if (bCur === 'table') await tideTable(el);
-  else if (bCur === 'overlay') await dayOverlay(el);
-  else if (bCur === 'predict') await predictPanel(el);
-  else await sysPanel(el);
+  if (bCur === 'charts') {
+    if (bSub === 'wind') await windRose(el); else await tidePlots(el);
+  } else if (bCur === 'forecast') {
+    if (bSub === 'table') await tideTable(el);
+    else if (bSub === 'overlay') await dayOverlay(el);
+    else await predictPanel(el);
+  } else {
+    if (bSub === 'alerts') await alertsPanel(el);
+    else if (bSub === 'virtual') await virtualPanel(el);
+    else await sysPanel(el);
+  }
 }
 
 // ── TIDE: separate chart per station ──
@@ -719,8 +732,8 @@ async function virtualPredict() {
 }
 
 // ── VIRTUAL STATION MANAGEMENT (in right panel) ──
-async function showVirtualUI() {
-  const el = $('rc');
+async function showVirtualUI(targetEl) {
+  const el = targetEl || $('rc');
   let html = `<div class="aform">
     <div style="font-size:.72rem;color:var(--t3);text-transform:uppercase;font-weight:700;margin-bottom:4px">Add Virtual Station</div>
     <input id="vs-name" placeholder="Name (e.g. CFC-TKP)">
@@ -791,6 +804,30 @@ async function addObs(id) {
 }
 
 // ── SYSTEM ──
+// ── ALERTS PANEL (bottom System tab) ──
+async function alertsPanel(el) {
+  let html = `<div style="padding:12px"><div class="aform">
+    <div style="font-size:.72rem;color:var(--t3);text-transform:uppercase;font-weight:700;margin-bottom:4px">Create Alert</div>
+    <select id="af-field"><option value="waterlevel">Water Level</option><option value="wspeed">Wind Speed</option></select>
+    <select id="af-op"><option value=">">&gt;</option><option value="<">&lt;</option><option value=">=">&gt;=</option><option value="<=">&lt;=</option></select>
+    <input id="af-val" type="number" step="0.1" placeholder="Threshold">
+    <button class="abtn" onclick="createAlert()">+ Create${sel ? ' for ' + sel : ''}</button>
+  </div>`;
+  try {
+    const d = await J('/alerts'); const al = d.alerts || []; const ev = d.recent_events || [];
+    if (al.length) html += '<div style="margin-top:12px">' + al.map(a => `<div class="alert-item"><span>${a.mmsi || 'All'} ${a.field} ${a.operator} ${a.threshold}</span><button class="alert-del" onclick="delAlert(${a.id})">✕</button></div>`).join('') + '</div>';
+    if (ev.length) html += `<div style="padding:8px 0;font-size:.68rem;color:var(--t3);text-transform:uppercase;font-weight:700;margin-top:12px">Recent Events</div>` +
+      ev.slice(0, 20).map(e => `<div class="alert-item"><span>${e.mmsi} = ${e.value?.toFixed(2) ?? '—'}</span><span style="color:var(--t3)">${ago(e.triggered_at)}</span></div>`).join('');
+  } catch (e) { html += '<div class="empty">Alerts unavailable</div>'; }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// ── VIRTUAL PANEL (bottom System tab) ──
+async function virtualPanel(el) {
+  await showVirtualUI(el);
+}
+
 async function sysPanel(el) {
   try {
     const h = await J('/health');
