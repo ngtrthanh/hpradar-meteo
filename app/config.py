@@ -5,11 +5,14 @@ import os
 # If no |interval, uses DEFAULT_POLL_INTERVAL
 _raw = os.getenv(
     "FETCH_SOURCES",
-    "https://m3.hpradar.com/api/binmsgs.json|60,"
-    "https://m4.hpradar.com/api/binmsgs.json|60,"
-    "https://aisinfra.hpradar.com/api/binmsgs.json|90"
+    # Defaults: poll at ~half the data cadence (stations broadcast every ~3min).
+    # Polling faster wastes upstream bandwidth and CPU; dedup catches it but
+    # the parse/insert pipeline still runs. See AGENTS.md.
+    "https://m3.hpradar.com/api/binmsgs.json|120,"
+    "https://m4.hpradar.com/api/binmsgs.json|120,"
+    "https://aisinfra.hpradar.com/api/binmsgs.json|180"
 )
-DEFAULT_POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "120"))
+DEFAULT_POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "180"))
 
 SOURCES = []
 for entry in _raw.split(","):

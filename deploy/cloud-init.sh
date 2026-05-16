@@ -15,7 +15,7 @@ git clone https://github.com/ngtrthanh/hpradar-meteo.git /srv/tide
 cd /srv/tide
 
 cat > .env << EOF
-FETCH_SOURCES=https://m3.hpradar.com/api/binmsgs.json|60,https://m4.hpradar.com/api/binmsgs.json|60,https://aisinfra.hpradar.com/api/binmsgs.json|90
+FETCH_SOURCES=https://m3.hpradar.com/api/binmsgs.json|120,https://m4.hpradar.com/api/binmsgs.json|120,https://aisinfra.hpradar.com/api/binmsgs.json|180
 DB_HOST=${DB_HOST}
 DB_PORT=5432
 DB_NAME=mhdb

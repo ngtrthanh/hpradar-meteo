@@ -13,7 +13,7 @@ services:
       - DB_NAME=${DB_NAME:-mhdb}
       - DB_USER=${DB_USER:-ais_user}
       - DB_PASS=${DB_PASS:-RTL2838UHIDIR}
-      - FETCH_SOURCES=${FETCH_SOURCES:-https://m3.hpradar.com/api/binmsgs.json|60,https://m4.hpradar.com/api/binmsgs.json|60,https://aisinfra.hpradar.com/api/binmsgs.json|90}
+      - FETCH_SOURCES=${FETCH_SOURCES:-https://m3.hpradar.com/api/binmsgs.json|120,https://m4.hpradar.com/api/binmsgs.json|120,https://aisinfra.hpradar.com/api/binmsgs.json|180}
       - RETENTION_DAYS=${RETENTION_DAYS:-9000}
       - API_KEY=${API_KEY:-}
     healthcheck:

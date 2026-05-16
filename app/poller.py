@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from collections import Counter, defaultdict
+from collections import Counter
 
 import httpx
 
@@ -16,6 +16,12 @@ _tasks: list[asyncio.Task] = []
 _last_wl: dict[int, tuple[float, object]] = {}
 SPIKE_THRESHOLD = 1.0  # metres
 MAX_RATE = 6.0  # metres/hour
+
+# Per-source state for upstream short-circuiting:
+#   _last_max_ts[url] — highest message timestamp we've already processed
+#   _last_modified[url] — Last-Modified header value to send as If-Modified-Since
+_last_max_ts: dict[str, int] = {}
+_last_modified: dict[str, str] = {}
 
 
 async def start():
@@ -55,11 +61,43 @@ async def _source_loop(url: str, interval: float):
 
 
 async def _fetch_source(client: httpx.AsyncClient, url: str):
-    resp = await client.get(url, timeout=30.0)
+    headers = {}
+    if url in _last_modified:
+        headers["If-Modified-Since"] = _last_modified[url]
+
+    resp = await client.get(url, timeout=30.0, headers=headers)
+
+    # Upstream-confirmed cache hit: nothing changed since last poll.
+    if resp.status_code == 304:
+        logger.info("Source %s: not_modified (304)", url)
+        return
+
     resp.raise_for_status()
+
+    # Remember the upstream Last-Modified for the next If-Modified-Since.
+    lm = resp.headers.get("last-modified")
+    if lm:
+        _last_modified[url] = lm
+
     arr = resp.json()
     if not isinstance(arr, list):
         return
+
+    # App-level cache short-circuit: if the highest message timestamp in this
+    # response is the same as last time, nothing new to process. Avoids
+    # parse + dedup + DB round-trip when upstream serves no-cache headers.
+    max_ts = 0
+    for obj in arr:
+        ts = obj.get("timestamp") or obj.get("message", {}).get("timestamp") or 0
+        if isinstance(ts, (int, float)) and ts > max_ts:
+            max_ts = int(ts)
+
+    prev = _last_max_ts.get(url, 0)
+    if max_ts and max_ts <= prev:
+        logger.info("Source %s: cached (max_ts=%d, %d msgs)", url, max_ts, len(arr))
+        return
+    if max_ts:
+        _last_max_ts[url] = max_ts
 
     stats = Counter()
     points = []

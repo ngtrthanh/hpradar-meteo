@@ -343,14 +343,17 @@ function closeMob() {
 }
 
 // ── TIME RANGE ──
+const TR_LABELS = { '1h': 'last 1h', '6h': 'last 6h', '24h': 'last 24h', '7d': 'last 7d', '30d': 'last 30d', 'all': 'all time', 'custom': 'custom' };
 function setRange(r) {
   timeRange = r;
   document.querySelectorAll('.trpick .trbtn').forEach(b => b.classList.toggle('on', b.textContent.trim().toLowerCase() === r));
   if (r === 'custom') {
-    trStart = $('tr-start').value ? new Date($('tr-start').value).toISOString() : null;
-    trEnd = $('tr-end').value ? new Date($('tr-end').value).toISOString() : null;
+    trStart = $('tr-start') && $('tr-start').value ? new Date($('tr-start').value).toISOString() : null;
+    trEnd = $('tr-end') && $('tr-end').value ? new Date($('tr-end').value).toISOString() : null;
   } else { trStart = null; trEnd = null }
   loadRight();
+  if (sel) loadDetail(sel);
+  if ($('app').classList.contains('bot-open')) loadBot();
 }
 function trQuery() {
   if (timeRange === 'all') return '';
@@ -375,12 +378,12 @@ async function loadRight() {
     if (rCur === 'meteo') {
       const d = await J(`/meteo?limit=500${q}${tq}`);
       lastRightData = d;
-      $('einfo').textContent = d.length + ' rows';
+      $('einfo').textContent = `${d.length} rows · ${TR_LABELS[timeRange] || timeRange}`;
       el.innerHTML = d.length ? `<table class="rt"><thead><tr><th>MMSI</th><th>Wind</th><th>Dir</th><th>When</th></tr></thead><tbody>${d.map(r => `<tr><td>${r.mmsi}</td><td class="hi">${r.wspeed ?? '—'}</td><td>${r.wdir ?? '—'}°</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No meteo data</div>';
     } else if (rCur === 'hydro') {
       const d = await J(`/hydro?limit=500${q}${tq}`);
       lastRightData = d;
-      $('einfo').textContent = d.length + ' rows';
+      $('einfo').textContent = `${d.length} rows · ${TR_LABELS[timeRange] || timeRange}`;
       el.innerHTML = d.length ? `<table class="rt"><thead><tr><th>MMSI</th><th>Level</th><th>When</th></tr></thead><tbody>${d.map(r => `<tr><td>${r.mmsi}</td><td class="hi">${r.waterlevel ?? '—'}</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No hydro data</div>';
     } else if (rCur === 'alerts') {
       // Moved to bottom panel System tab

@@ -35,6 +35,12 @@ discarded the next time the image is pulled or the container is recreated.**
    page load — no restart needed, but bump the `?v=N` cache-buster in
    `index.html` so browsers fetch the new file.
 
+   ⚠️ `docker compose up -d --force-recreate` (or watchtower pulling a
+   new image) recreates the container from the IMAGE — every
+   `docker cp` patch is wiped. Always commit + push + rebuild the
+   image *before* triggering a recreate, or expect to re-apply patches
+   manually right after.
+
 3. **Commit before deploying.**
    The "edit container, forget to commit, next deploy reverts the fix"
    loop is exactly how the Vietnam-MMSI marker bug came back twice.
@@ -82,6 +88,41 @@ Always:
   to MapLibre.
 - Wrap `setLngLat()` and `new maplibregl.Marker(...).addTo(map)` in
   `try/catch`.
+
+## Polling cadence
+
+Rule of thumb: **poll at half the data cadence, not faster.**
+
+AtoN AIS stations broadcast at fixed intervals (~3 minutes for our
+stations). Polling the upstream every 30–60 seconds runs the full
+parse / dedup / DB-insert pipeline 3–6× for every genuine update,
+wasting both our CPU and upstream bandwidth. Dedup catches the
+duplicates so data is correct, but the work was done unnecessarily.
+
+Current defaults (see `app/config.py`):
+
+| Source                        | Interval |
+| ----------------------------- | -------- |
+| m3.hpradar.com                | 120s     |
+| m4.hpradar.com                | 120s     |
+| aisinfra.hpradar.com          | 180s     |
+| `DEFAULT_POLL_INTERVAL`       | 180s     |
+
+Upstream `binmsgs.json` typically holds the last 6–10 messages — well
+over 5 minutes of capacity at our station rates — so 120–180 s polling
+is safe.
+
+The poller short-circuits when `max(message.timestamp)` in the response
+is not greater than the previous max for that source (logged as
+`cached (max_ts=...)`). It also sends `If-Modified-Since`, but most
+upstreams currently send `Cache-Control: no-cache` so the
+`last_max_ts` path is the one that actually fires.
+
+When raising the poll rate, also confirm:
+- Upstream doesn't rate-limit clients
+- Buffer capacity (`len(arr)` × broadcast period) > poll interval
+- DB upsert load is acceptable (`db.batch_upsert_flagged` runs in a
+  transaction per poll)
 
 ## Deploy / verify checklist
 

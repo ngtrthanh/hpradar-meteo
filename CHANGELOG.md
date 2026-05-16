@@ -5,6 +5,53 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-05-16
+
+### Fixed
+- **Time-range filter buttons (1H / 6H / 24H / 7D / 30D / All)** now also
+  refresh the bottom-panel charts (Tide, Wind Rose, Forecast) and the
+  selected-station detail card. Previously `setRange()` only re-fetched
+  the right-side data table, so charts stayed frozen on the previous
+  range while the button highlight changed.
+- HTML default `on` class moved from `1H` to `24H` to match the JS
+  initializer (`timeRange = '24h'`). They were out of sync, so first
+  paint showed `1H` highlighted while the actual loaded data was
+  `last 24h`.
+
+### Added
+- **Active-range indicator** in the export bar: `"349 rows · last 24h"`
+  instead of just `"349 rows"`. Removes the ambiguity of which window
+  the table is showing.
+- **Upstream cache short-circuit (`last_max_ts`).** Each source remembers
+  the highest message timestamp it has already processed. If the next
+  poll returns no message with a newer timestamp, the parse / dedup /
+  DB-insert pipeline is skipped and a single `cached (max_ts=...)`
+  log line is emitted.
+- **`If-Modified-Since`** header sent on every upstream request, with
+  the previous response's `Last-Modified` value. Upstream returns
+  `304 Not Modified` → log `not_modified (304)` and skip processing.
+  (Current upstreams send `Cache-Control: no-cache` so this path is
+  defensive only, but it costs nothing and protects against future
+  upstream caching.)
+
+### Changed
+- **Default upstream poll intervals doubled** to halve wasted load:
+  - m3: 60s → 120s
+  - m4: 60s → 120s
+  - aisinfra: 90s → 180s
+  - `DEFAULT_POLL_INTERVAL`: 120s → 180s
+  AIS AtoN stations broadcast every ~3 minutes, so polling every 60s
+  was running the full pipeline 3× per genuine update. New defaults
+  poll at half the data cadence (Nyquist with safety margin) and stay
+  well within the upstream buffer capacity (~10 messages × 5 min).
+  All values remain env-overridable via `FETCH_SOURCES`.
+
+### Docs
+- `docs/BACKEND.md`, `README.md`, `.env.example`,
+  `deploy/cloud-init.sh` updated to reflect the new default intervals.
+- `AGENTS.md` gains a "Polling cadence" section: rule of thumb is
+  *poll at half the data cadence, not faster*.
+
 ## [2.2.1] — 2026-05-16
 
 ### Fixed

@@ -321,7 +321,7 @@ Only quality=0 (good) data is broadcast. Max 100 points per message.
 {
   "status": "ok",
   "sources": [
-    { "url": "https://m3.hpradar.com/api/binmsgs.json", "interval": 60.0 }
+    { "url": "https://m3.hpradar.com/api/binmsgs.json", "interval": 120.0 }
   ],
   "db_pool": "connected",
   "poller": "running",
@@ -377,9 +377,9 @@ Indexes: `idx_meteo_ts (ts DESC)`, `idx_hydro_ts (ts DESC)`
 
 3 independent async loops, each with own interval:
 ```
-m3.hpradar.com      → 60s
-m4.hpradar.com      → 60s
-aisinfra.hpradar.com → 90s
+m3.hpradar.com      → 120s
+m4.hpradar.com      → 120s
+aisinfra.hpradar.com → 180s
 ```
 
 Each cycle: fetch → parse → sentinel strip → dedup → spike flag → batch insert → alert check → WebSocket broadcast.

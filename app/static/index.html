@@ -8,7 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/lipis/flag-icons@7.2.3/css/flag-icons.min.css">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
-<link rel="stylesheet" href="/static/app.css?v=6">
+<link rel="stylesheet" href="/static/app.css?v=7">
 </head>
 <body>
 <div id="app">
@@ -47,9 +47,9 @@
       <div class="rtab" data-t="hydro" onclick="rTab('hydro')">🌊 Hydro</div>
     </div>
     <div class="trpick" id="rtime">
-      <button class="trbtn on" onclick="setRange('1h')">1H</button>
+      <button class="trbtn" onclick="setRange('1h')">1H</button>
       <button class="trbtn" onclick="setRange('6h')">6H</button>
-      <button class="trbtn" onclick="setRange('24h')">24H</button>
+      <button class="trbtn on" onclick="setRange('24h')">24H</button>
       <button class="trbtn" onclick="setRange('7d')">7D</button>
       <button class="trbtn" onclick="setRange('30d')">30D</button>
       <button class="trbtn" onclick="setRange('all')">All</button>
@@ -80,6 +80,6 @@
 </div>
 <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>

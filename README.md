@@ -11,7 +11,7 @@ Real-time maritime meteorological and hydrographic data collection from AIS broa
 ## Features
 
 ### Data Collection
-- **Multi-source AIS polling** — 3 receivers (Vietnam, UK/Europe) with per-source intervals (60s/90s)
+- **Multi-source AIS polling** — 3 receivers (Vietnam, UK/Europe) with per-source intervals (120s/180s)
 - **30+ weather stations** across Vietnam, UK, Finland, Sweden, Ireland, Canada, Spain, Estonia, Singapore
 - **Data quality pipeline** — AIS sentinel stripping, physical bounds checking, spike detection (rate-of-change filter), IRLS outlier rejection
 - **Raw data preservation** — bad data flagged, never discarded
@@ -70,9 +70,9 @@ Real-time maritime meteorological and hydrographic data collection from AIS broa
 └───────────────────────────────────────────────────────────┘
            ▲
    AIS Sources (HTTP JSON)
-   ├── m3.hpradar.com   (60s)
-   ├── m4.hpradar.com   (60s)
-   └── aisinfra.hpradar.com (90s)
+   ├── m3.hpradar.com   (120s)
+   ├── m4.hpradar.com   (120s)
+   └── aisinfra.hpradar.com (180s)
 ```
 
 ## Quick Start
@@ -91,7 +91,7 @@ All config via environment variables (or `.env` file):
 
 | Variable | Default | Description |
 |---|---|---|
-| `FETCH_SOURCES` | `url\|60,url\|90,...` | Data sources with per-source poll intervals |
+| `FETCH_SOURCES` | `url\|120,url\|180,...` | Data sources with per-source poll intervals |
 | `DB_HOST` | `100.100.40.89` | PostgreSQL host |
 | `DB_PORT` | `5432` | PostgreSQL port |
 | `DB_NAME` | `mhdb` | Database name |
