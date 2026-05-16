@@ -60,7 +60,7 @@ async def _ensure_schema(pool: asyncpg.Pool):
             CREATE TABLE IF NOT EXISTS hydro_obs (
                 mmsi BIGINT REFERENCES stations(mmsi) ON DELETE CASCADE,
                 ts TIMESTAMPTZ NOT NULL,
-                waterlevel DOUBLE PRECISION, seastate INT,
+                waterlevel DOUBLE PRECISION,
                 PRIMARY KEY (mmsi, ts)
             );
         """)
@@ -157,23 +157,23 @@ async def batch_upsert_flagged(flagged):
                 """, meteo)
 
             # Hydro: store ALL raw data with quality flag if column exists
-            hydro_data = [(p.mmsi, p.ts, p.waterlevel, p.seastate, q)
+            hydro_data = [(p.mmsi, p.ts, p.waterlevel, q)
                           for p, q in flagged if p.waterlevel is not None]
             if hydro_data:
                 try:
                     sp = await conn.execute("SAVEPOINT hydro_sp")
                     await conn.executemany("""
-                        INSERT INTO hydro_obs (mmsi, ts, waterlevel, seastate, quality)
-                        VALUES ($1,$2,$3,$4,$5)
+                        INSERT INTO hydro_obs (mmsi, ts, waterlevel, quality)
+                        VALUES ($1,$2,$3,$4)
                         ON CONFLICT (mmsi, ts) DO UPDATE SET quality = EXCLUDED.quality
                     """, hydro_data)
                 except Exception:
                     await conn.execute("ROLLBACK TO SAVEPOINT hydro_sp")
                     await conn.executemany("""
-                        INSERT INTO hydro_obs (mmsi, ts, waterlevel, seastate)
-                        VALUES ($1,$2,$3,$4)
+                        INSERT INTO hydro_obs (mmsi, ts, waterlevel)
+                        VALUES ($1,$2,$3)
                         ON CONFLICT (mmsi, ts) DO NOTHING
-                    """, [(h[0], h[1], h[2], h[3]) for h in hydro_data])
+                    """, [(h[0], h[1], h[2]) for h in hydro_data])
 
     good = sum(1 for _, q in flagged if q == 0)
     bad = sum(1 for _, q in flagged if q > 0)

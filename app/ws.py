@@ -34,7 +34,7 @@ async def broadcast(points):
                 "mmsi": p.mmsi, "ts": p.ts.isoformat(),
                 "lat": p.lat, "lon": p.lon,
                 "wspeed": p.wspeed, "wdir": p.wdir,
-                "waterlevel": p.waterlevel, "seastate": p.seastate,
+                "waterlevel": p.waterlevel,
                 "country": p.country,
             }
             for p in points[:100]  # cap payload size

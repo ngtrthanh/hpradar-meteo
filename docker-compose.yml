@@ -1,8 +1,9 @@
+name: ops-hydro
 services:
   hydro-api:
     image: ghcr.io/ngtrthanh/hpradar-meteo:latest
     build: .
-    container_name: hydro-api
+    container_name: ops-hydro-api
     restart: unless-stopped
     ports:
       - "8113:8000"

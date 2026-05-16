@@ -15,16 +15,33 @@ const MAP_STYLES = {
   'CartoDB Dark': { url: 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', attribution: '© CartoDB © OSM' },
   'OpenTopo': { url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png', attribution: '© OpenTopoMap' },
 };
-let curStyle = 'Dark';
+let curStyle = localStorage.getItem('mapStyle') || 'Liberty';
 
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', async () => {
+  initTheme();
   initMap(); buildLayerSw();
   await go();
   refreshNames();
   initWS();
   setInterval(go, 60000); // fallback poll every 60s
 });
+
+// ── THEME ──
+function initTheme() {
+  const saved = localStorage.getItem('theme') || 'light';
+  applyTheme(saved);
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('theme-tog');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+  localStorage.setItem('theme', theme);
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'light';
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+}
 async function go() { await Promise.all([loadNav(), loadStations(), loadVirtualMarkers(), loadRight()]) }
 
 // ── NAV ──
@@ -48,7 +65,7 @@ function initMap() {
       sources: { base: { type: 'raster', tiles: [style.url], tileSize: 256, attribution: style.attribution } },
       layers: [{ id: 'base', type: 'raster', source: 'base' }]
     },
-    center: [10, 35], zoom: 3, attributionControl: false,
+    center: [60, 30], zoom: 2, attributionControl: false,
   });
   map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 150, unit: 'metric' }), 'bottom-left');
@@ -70,6 +87,7 @@ function buildLayerSw() {
 
 function switchStyle(name) {
   curStyle = name;
+  localStorage.setItem('mapStyle', name);
   const style = MAP_STYLES[name];
   const isVector = typeof style === 'string';
   if (isVector) {
@@ -97,7 +115,12 @@ function syncMK() {
   MK.forEach((m, k) => { if (!STN.find(s => String(s.mmsi) === k)) { m.remove(); MK.delete(k); } });
   STN.forEach((s, i) => {
     if (!s.lat || !s.lon) return;
-    if (MK.has(String(s.mmsi))) { MK.get(String(s.mmsi)).setLngLat([s.lon, s.lat]); return }
+    if (typeof s.lat !== 'number' || typeof s.lon !== 'number') return;
+    if (s.lat < -90 || s.lat > 90 || s.lon < -180 || s.lon > 180) return;
+    if (MK.has(String(s.mmsi))) {
+      try { MK.get(String(s.mmsi)).setLngLat([s.lon, s.lat]); } catch (e) { console.warn('setLngLat failed for', s.mmsi, e); }
+      return;
+    }
     const c = C[i % C.length];
     const fresh = freshness(s);
     // Outer wrapper: fixed size, centers the dot inside
@@ -113,7 +136,9 @@ function syncMK() {
     wrap.onmouseleave = () => { dot.style.width = '12px'; dot.style.height = '12px'; dot.style.boxShadow = `0 0 10px ${c}80`; popup.remove() };
     wrap.onclick = () => pick(s.mmsi);
     wrap._dot = dot; wrap._color = c;
-    MK.set(String(s.mmsi), new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([s.lon, s.lat]).addTo(map));
+    try {
+      MK.set(String(s.mmsi), new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([s.lon, s.lat]).addTo(map));
+    } catch (e) { console.warn('Marker creation failed for', s.mmsi, e); }
   });
 }
 
@@ -213,7 +238,9 @@ function freshness(s) {
 async function pick(mmsi) {
   sel = sel === mmsi ? null : mmsi;
   renderList();
-  // highlight marker — no map pan
+  // fly to station on select
+  if (sel) { const s = STN.find(x => x.mmsi === mmsi); if (s && s.lon && s.lat) map.flyTo({ center: [s.lon, s.lat], zoom: Math.max(map.getZoom(), 8) }); }
+  // highlight marker
   MK.forEach((m, k) => {
     const wrap = m.getElement();
     const dot = wrap._dot, c = wrap._color;
@@ -271,7 +298,7 @@ async function loadDetail(mmsi) {
     let html = '<div class="dt">Latest</div>';
     const a = m[0], b = h[0];
     if (a) html += dr('Wind', `<span class="hi">${a.wspeed ?? '—'}</span> m/s`) + dr('Dir', `${a.wdir ?? '—'}°`) + dr('Time', ago(a.ts));
-    if (b) html += dr('Level', `<span style="color:var(--cyan)">${b.waterlevel ?? '—'}</span> m`) + dr('Sea', b.seastate ?? '—') + dr('Time', ago(b.ts));
+    if (b) html += dr('Level', `<span style="color:var(--cyan)">${b.waterlevel ?? '—'}</span> m`) + dr('Time', ago(b.ts));
     if (!a && !b) html += '<div class="empty">No data</div>';
     el.innerHTML = html; el.classList.add('show');
   } catch (e) { el.classList.remove('show') }
@@ -342,7 +369,7 @@ async function loadRight() {
       const d = await J(`/hydro?limit=500${q}${tq}`);
       lastRightData = d;
       $('einfo').textContent = d.length + ' rows';
-      el.innerHTML = d.length ? `<table class="rt"><thead><tr><th>MMSI</th><th>Level</th><th>Sea</th><th>When</th></tr></thead><tbody>${d.map(r => `<tr><td>${r.mmsi}</td><td class="hi">${r.waterlevel ?? '—'}</td><td>${r.seastate ?? '—'}</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No hydro data</div>';
+      el.innerHTML = d.length ? `<table class="rt"><thead><tr><th>MMSI</th><th>Level</th><th>When</th></tr></thead><tbody>${d.map(r => `<tr><td>${r.mmsi}</td><td class="hi">${r.waterlevel ?? '—'}</td><td>${ago(r.ts)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No hydro data</div>';
     } else if (rCur === 'alerts') {
       // Moved to bottom panel System tab
       el.innerHTML = '<div class="empty">Alerts moved to ⚙ System tab in bottom panel</div>';

@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 # AIS "not available" sentinel values (IMO Circ.289 / ITU-R M.1371)
 _SENTINELS = {
-    "seastate": lambda v: v is None or v >= 13,
     "wspeed": lambda v: v is None or v >= 127,
     "wdir": lambda v: v is None or v >= 360,
     "waterlevel": lambda v: v is None or v >= 327 or v <= -327,
@@ -19,7 +18,6 @@ _BOUNDS = {
     "wspeed": (0, 100),        # m/s — cat 5 hurricane ~70
     "wdir": (0, 359),
     "waterlevel": (-15, 25),   # metres
-    "seastate": (0, 9),
 }
 
 
@@ -65,16 +63,15 @@ def parse_message(obj: dict) -> tuple[Optional[MeteoHydroPoint], Optional[str]]:
         wspeed = _clean("wspeed", msg.get("wspeed"))
         wdir = _clean("wdir", msg.get("wdir"))
         waterlevel = _clean("waterlevel", msg.get("waterlevel"))
-        seastate = _clean("seastate", msg.get("seastate"))
 
         # Reject if nothing useful remains
-        if wspeed is None and wdir is None and waterlevel is None and seastate is None:
+        if wspeed is None and wdir is None and waterlevel is None:
             return None, Rejection.NO_DATA
 
         point = MeteoHydroPoint(
             mmsi=int(mmsi), dac=msg.get("dac"), fi=msg.get("fid"),
             ts=ts, lon=float(lon), lat=float(lat),
-            wspeed=wspeed, wdir=wdir, waterlevel=waterlevel, seastate=seastate,
+            wspeed=wspeed, wdir=wdir, waterlevel=waterlevel,
             country=msg.get("country"), signalpower=msg.get("signalpower"),
         )
         return point, None

@@ -13,6 +13,5 @@ class MeteoHydroPoint(BaseModel):
     wspeed: Optional[float] = None
     wdir: Optional[int] = None
     waterlevel: Optional[float] = None
-    seastate: Optional[int] = None
     country: Optional[str] = None
     signalpower: Optional[float] = None

@@ -99,7 +99,7 @@ async def get_station_detail(mmsi: int):
         latest_meteo = await conn.fetchrow(
             "SELECT ts, wspeed, wdir FROM meteo_obs WHERE mmsi=$1 ORDER BY ts DESC LIMIT 1", mmsi)
         latest_hydro = await conn.fetchrow(
-            "SELECT ts, waterlevel, seastate FROM hydro_obs WHERE mmsi=$1 ORDER BY ts DESC LIMIT 1", mmsi)
+            "SELECT ts, waterlevel FROM hydro_obs WHERE mmsi=$1 ORDER BY ts DESC LIMIT 1", mmsi)
         meteo_count = await conn.fetchval("SELECT COUNT(*) FROM meteo_obs WHERE mmsi=$1", mmsi)
         hydro_count = await conn.fetchval("SELECT COUNT(*) FROM hydro_obs WHERE mmsi=$1", mmsi)
 
@@ -151,12 +151,12 @@ async def get_hydro(
     pool = await db.get_pool()
     lim = _clamp_limit(limit)
     clauses, params = _build_filters(mmsi, start, end)
-    q = f"SELECT mmsi, ts, waterlevel, seastate FROM hydro_obs {clauses} ORDER BY ts DESC LIMIT {lim}"
+    q = f"SELECT mmsi, ts, waterlevel FROM hydro_obs {clauses} ORDER BY ts DESC LIMIT {lim}"
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(q, *params)
     return [{"mmsi": r["mmsi"], "ts": r["ts"].isoformat(),
-             "waterlevel": r["waterlevel"], "seastate": r["seastate"]}
+             "waterlevel": r["waterlevel"]}
             for r in rows]
 
 
@@ -499,13 +499,13 @@ async def get_alerts():
 @router.post("/alerts")
 async def create_alert(
     mmsi: Optional[int] = Query(None),
-    field: str = Query(..., description="Field: waterlevel, wspeed, wdir, seastate"),
+    field: str = Query(..., description="Field: waterlevel, wspeed, wdir"),
     operator: str = Query(">", description="Operator: >, <, >=, <=, ="),
     threshold: float = Query(...),
 ):
     """Create a threshold alert."""
-    if field not in ("waterlevel", "wspeed", "wdir", "seastate"):
-        raise HTTPException(400, "field must be one of: waterlevel, wspeed, wdir, seastate")
+    if field not in ("waterlevel", "wspeed", "wdir"):
+        raise HTTPException(400, "field must be one of: waterlevel, wspeed, wdir")
     if operator not in (">", "<", ">=", "<=", "="):
         raise HTTPException(400, "operator must be one of: >, <, >=, <=, =")
     pool = await db.get_pool()
