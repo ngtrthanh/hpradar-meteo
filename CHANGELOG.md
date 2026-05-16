@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] — 2026-05-16
+
+### Fixed
+- **Light-theme contrast pass.** Tertiary text (labels, timestamps,
+  sub-text) and accent colors were too pale on white backgrounds, often
+  failing WCAG AA. Pass made systematically:
+  - `--t3` darkened from `#718096` to `#475569` (~7:1 contrast on white)
+  - `--t2` darkened from `#4a5568` to `#334155`
+  - `--neon` darkened from `#00b377` to `#047857` (~5.5:1 contrast)
+  - `--cyan` darkened from `#0099cc` to `#0369a1`
+  - `--border` strengthened from `#e2e8f0` to `#cbd5e0`
+  - Added `--shadow-card` for subtle panel/card depth in light mode
+- **Per-station color palette is now theme-aware.** The neon palette
+  (`#00ffaa`, `#ffcc00`, etc.) was unreadable as text on white. A
+  parallel darker palette is used in light mode (teal, blue, magenta,
+  burnt orange, amber, indigo, etc.) and swapped automatically on
+  theme toggle. Markers and the station list re-render on swap.
+- **Map marker borders** are now theme-aware: white outline on light
+  maps, dark outline on dark maps. Added a 1px outer halo so dots
+  remain visible regardless of basemap colors.
+- Right-panel table headers use a stronger background (`--bg4`) and
+  darker label color for legibility.
+- Search input border, time-range buttons, export buttons, and popup
+  styling all rebalanced for both themes.
+
 ## [2.2.0] — 2026-05-16
 
 ### Removed

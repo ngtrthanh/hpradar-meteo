@@ -1,7 +1,9 @@
 const A = '/api';
 let STN = [], sel = null, map, popup, rCur = 'meteo', bCur = 'charts', searchQ = '';
 let timeRange = '24h', trStart = null, trEnd = null, lastRightData = [];
-const C = ['#00ffaa', '#00d4ff', '#ff00aa', '#ff8800', '#ffcc00', '#aa55ff', '#ff3355', '#55ffcc', '#00ff55', '#ff5500', '#55aaff', '#ff55aa'];
+const C_DARK = ['#00ffaa', '#00d4ff', '#ff00aa', '#ff8800', '#ffcc00', '#aa55ff', '#ff3355', '#55ffcc', '#00ff55', '#ff5500', '#55aaff', '#ff55aa'];
+const C_LIGHT = ['#0d9488', '#0369a1', '#be185d', '#c2410c', '#a16207', '#7c3aed', '#b91c1c', '#0e7490', '#15803d', '#9a3412', '#1d4ed8', '#a21caf'];
+let C = C_LIGHT;
 const MK = new Map(); // marker cache
 
 // ── MAP STYLES ──
@@ -37,6 +39,14 @@ function applyTheme(theme) {
   const btn = document.getElementById('theme-tog');
   if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
   localStorage.setItem('theme', theme);
+  C = (theme === 'dark') ? C_DARK : C_LIGHT;
+  // Re-render markers + list with new palette
+  if (typeof MK !== 'undefined' && typeof map !== 'undefined' && map) {
+    MK.forEach(m => m.remove());
+    MK.clear();
+    if (typeof STN !== 'undefined' && STN.length && typeof syncMK === 'function') syncMK();
+    if (typeof renderList === 'function') renderList();
+  }
 }
 function toggleTheme() {
   const cur = document.documentElement.getAttribute('data-theme') || 'light';
@@ -130,7 +140,9 @@ function syncMK() {
     const dot = document.createElement('div');
     const opacity = fresh === 'dead' ? '0.3' : fresh === 'stale' ? '0.6' : '1';
     const anim = fresh === 'fresh' ? 'animation:mk-pulse 2s ease-in-out infinite;' : fresh === 'stale' ? 'animation:mk-pulse 4s ease-in-out infinite;' : '';
-    dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${c};border:2px solid #080c14;box-shadow:0 0 10px ${c}80;opacity:${opacity};transition:width .15s,height .15s;${anim}`;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const dotBorder = isDark ? '#080c14' : '#ffffff';
+    dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${c};border:2px solid ${dotBorder};box-shadow:0 0 8px ${c}cc,0 0 0 1px rgba(0,0,0,.15);opacity:${opacity};transition:width .15s,height .15s;${anim}`;
     wrap.appendChild(dot);
     wrap.onmouseenter = () => { dot.style.width = '18px'; dot.style.height = '18px'; dot.style.boxShadow = `0 0 18px ${c}`; showPop(s) };
     wrap.onmouseleave = () => { dot.style.width = '12px'; dot.style.height = '12px'; dot.style.boxShadow = `0 0 10px ${c}80`; popup.remove() };
@@ -714,7 +726,9 @@ async function loadVirtualMarkers() {
       const el = document.createElement('div');
       el.style.cssText = 'width:24px;height:24px;display:flex;align-items:center;justify-content:center;cursor:pointer';
       const dot = document.createElement('div');
-      dot.style.cssText = 'width:14px;height:14px;border-radius:3px;background:#ffcc00;border:2px solid #080c14;box-shadow:0 0 10px rgba(255,204,0,.5);transition:width .15s,height .15s';
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const dotBorder = isDark ? '#080c14' : '#ffffff';
+      dot.style.cssText = `width:14px;height:14px;border-radius:3px;background:#eab308;border:2px solid ${dotBorder};box-shadow:0 0 8px rgba(234,179,8,.6),0 0 0 1px rgba(0,0,0,.15);transition:width .15s,height .15s`;
       dot.title = vs.name;
       el.appendChild(dot);
       el.onmouseenter = () => {
