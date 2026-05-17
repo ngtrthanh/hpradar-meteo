@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] — 2026-05-17
+
+### Fixed
+- **PostgreSQL log spam.** Every poll cycle was logging
+  `ERROR: column "quality" of relation "hydro_obs" does not exist`
+  on the database server. The app's `batch_upsert_flagged` was
+  using a `SAVEPOINT` + `try/except` pattern to fall back to an
+  INSERT without the `quality` column when the column was absent —
+  the fallback worked, but PostgreSQL still logged the rejected
+  first attempt as an ERROR. Replaced the runtime fallback with a
+  capability flag (`_HAS_HYDRO_QUALITY`) detected once at startup;
+  the right INSERT statement is chosen up front. Same treatment
+  for `_HAS_STATIONS_NAME` (used by `/api/stations`), which was
+  doing a per-request `information_schema.columns` lookup.
+- Optional `ALTER TABLE` and `CREATE INDEX` migrations are now
+  gated on table ownership (`pg_tables.tableowner = current_user`)
+  before being attempted. On a shared `mhdb` where the runtime
+  user (`ais_user`) doesn't own anything, every restart used to
+  log six `must be owner of table ...` warnings on both the app
+  and PG side. Now silent when not owner.
+
 ## [2.3.0] — 2026-05-16
 
 ### Fixed

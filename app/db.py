@@ -9,6 +9,10 @@ import config
 logger = logging.getLogger(__name__)
 
 _pool: Optional[asyncpg.Pool] = None
+# Capability flags detected once at startup. Avoids per-poll PG ERROR spam
+# from the legacy try/INSERT-with-quality / except/INSERT-without pattern.
+_HAS_HYDRO_QUALITY: bool = False
+_HAS_STATIONS_NAME: bool = False
 
 
 async def get_pool() -> asyncpg.Pool:
@@ -65,13 +69,34 @@ async def _ensure_schema(pool: asyncpg.Pool):
             );
         """)
 
-        # Optional migrations — may fail on permission-restricted DBs
-        _optional = [
-            "ALTER TABLE stations ADD COLUMN IF NOT EXISTS name TEXT",
-            "ALTER TABLE meteo_obs ADD COLUMN IF NOT EXISTS quality SMALLINT DEFAULT 0",
-            "ALTER TABLE hydro_obs ADD COLUMN IF NOT EXISTS quality SMALLINT DEFAULT 0",
-            "CREATE INDEX IF NOT EXISTS idx_meteo_ts ON meteo_obs (ts DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_hydro_ts ON hydro_obs (ts DESC)",
+        # Detect what we own. Optional migrations are pointless (and noisy)
+        # on tables we can't ALTER. ais_user typically only owns nothing in a
+        # shared mhdb; tables are owned by scale_user.
+        owned = {r["tablename"] for r in await conn.fetch(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname='public' AND tableowner=current_user"
+        )}
+
+        # Optional migrations, gated on ownership.
+        _alter_migrations = [
+            ("stations",  "ALTER TABLE stations ADD COLUMN IF NOT EXISTS name TEXT"),
+            ("meteo_obs", "ALTER TABLE meteo_obs ADD COLUMN IF NOT EXISTS quality SMALLINT DEFAULT 0"),
+            ("hydro_obs", "ALTER TABLE hydro_obs ADD COLUMN IF NOT EXISTS quality SMALLINT DEFAULT 0"),
+            ("meteo_obs", "CREATE INDEX IF NOT EXISTS idx_meteo_ts ON meteo_obs (ts DESC)"),
+            ("hydro_obs", "CREATE INDEX IF NOT EXISTS idx_hydro_ts ON hydro_obs (ts DESC)"),
+        ]
+        for tbl, sql in _alter_migrations:
+            if tbl not in owned:
+                logger.debug("Skip %s migration on %s (not owner)", sql.split()[0], tbl)
+                continue
+            try:
+                await conn.execute(sql)
+            except Exception as e:
+                logger.warning("Migration on %s skipped: %s", tbl, e)
+
+        # Always-safe migrations (CREATE TABLE IF NOT EXISTS — creates tables
+        # we will own ourselves).
+        _safe_migrations = [
             """CREATE TABLE IF NOT EXISTS virtual_stations (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -98,11 +123,11 @@ async def _ensure_schema(pool: asyncpg.Pool):
                 mmsi BIGINT, ts TIMESTAMPTZ,
                 value DOUBLE PRECISION, triggered_at TIMESTAMPTZ DEFAULT NOW())""",
         ]
-        for sql in _optional:
+        for sql in _safe_migrations:
             try:
                 await conn.execute(sql)
             except Exception as e:
-                logger.warning("Optional migration skipped: %s", e)
+                logger.warning("Migration skipped: %s", e)
 
         # TimescaleDB hypertables + retention (Phase 2 item 7)
         try:
@@ -117,6 +142,23 @@ async def _ensure_schema(pool: asyncpg.Pool):
             logger.info("TimescaleDB hypertables + retention ready")
         except Exception as e:
             logger.warning("TimescaleDB setup skipped: %s", e)
+
+        # Detect optional columns once. batch_upsert_flagged uses these to
+        # pick the right INSERT statement instead of try/except per poll
+        # (which logs a PG ERROR every cycle when the column is absent).
+        global _HAS_HYDRO_QUALITY, _HAS_STATIONS_NAME
+        _HAS_HYDRO_QUALITY = await conn.fetchval(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns "
+            "WHERE table_name='hydro_obs' AND column_name='quality'"
+        )
+        _HAS_STATIONS_NAME = await conn.fetchval(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns "
+            "WHERE table_name='stations' AND column_name='name'"
+        )
+        logger.info(
+            "Capability flags: hydro_obs.quality=%s, stations.name=%s",
+            _HAS_HYDRO_QUALITY, _HAS_STATIONS_NAME,
+        )
 
     logger.info("Schema ready")
 
@@ -156,24 +198,27 @@ async def batch_upsert_flagged(flagged):
                     ON CONFLICT (mmsi, ts) DO NOTHING
                 """, meteo)
 
-            # Hydro: store ALL raw data with quality flag if column exists
-            hydro_data = [(p.mmsi, p.ts, p.waterlevel, q)
-                          for p, q in flagged if p.waterlevel is not None]
-            if hydro_data:
-                try:
-                    sp = await conn.execute("SAVEPOINT hydro_sp")
+            # Hydro: store waterlevel rows; only write quality column if present.
+            # Branch is decided once at startup (_HAS_HYDRO_QUALITY) so we don't
+            # generate a PG ERROR every poll when the column is absent.
+            if _HAS_HYDRO_QUALITY:
+                hydro_data = [(p.mmsi, p.ts, p.waterlevel, q)
+                              for p, q in flagged if p.waterlevel is not None]
+                if hydro_data:
                     await conn.executemany("""
                         INSERT INTO hydro_obs (mmsi, ts, waterlevel, quality)
                         VALUES ($1,$2,$3,$4)
                         ON CONFLICT (mmsi, ts) DO UPDATE SET quality = EXCLUDED.quality
                     """, hydro_data)
-                except Exception:
-                    await conn.execute("ROLLBACK TO SAVEPOINT hydro_sp")
+            else:
+                hydro_data = [(p.mmsi, p.ts, p.waterlevel)
+                              for p, _ in flagged if p.waterlevel is not None]
+                if hydro_data:
                     await conn.executemany("""
                         INSERT INTO hydro_obs (mmsi, ts, waterlevel)
                         VALUES ($1,$2,$3)
                         ON CONFLICT (mmsi, ts) DO NOTHING
-                    """, [(h[0], h[1], h[2]) for h in hydro_data])
+                    """, hydro_data)
 
     good = sum(1 for _, q in flagged if q == 0)
     bad = sum(1 for _, q in flagged if q > 0)

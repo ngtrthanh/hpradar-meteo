@@ -61,10 +61,7 @@ async def get_stations(limit: int = Query(1000)):
         return cached
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        has_name = await conn.fetchval(
-            "SELECT COUNT(*) > 0 FROM information_schema.columns "
-            "WHERE table_name='stations' AND column_name='name'")
-        name_col = "s.name," if has_name else "NULL AS name,"
+        name_col = "s.name," if db._HAS_STATIONS_NAME else "NULL AS name,"
         rows = await conn.fetch(f"""
             SELECT s.mmsi, s.dac, s.fi, s.lon, s.lat, s.country, {name_col}
                    (SELECT COUNT(*) FROM meteo_obs m WHERE m.mmsi = s.mmsi) AS meteo_count,
